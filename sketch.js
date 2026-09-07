@@ -79,6 +79,61 @@ function touchEnded() {
   touchIsDown = false;
 }
 
+// p5.play calls p5's _updateTouchCoords() with no argument, but p5 0.8.0
+// requires the event object and reads e.touches from it. The resulting
+// TypeError was thrown inside every mousedown and touchstart handler,
+// aborting them before the sketch's own handlers ran - which is why clicks
+// and taps did nothing. Make the argument optional.
+(function patchTouchCoords() {
+  var original = p5.prototype._updateTouchCoords;
+  p5.prototype._updateTouchCoords = function(e) {
+    if (!e || !e.touches) {
+      return;
+    }
+    return original.call(this, e);
+  };
+})();
+
+// Set by the canvas pointer handler below and consumed in draw().
+var restartRequested = false;
+
+// p5.play maps pointer positions with canvas.offsetWidth (the CSS size)
+// instead of canvas.width (the drawing buffer), so mouseX/mouseY come back
+// in screen pixels once the canvas is scaled to fill the window - which
+// broke mousePressedOver(). Do the conversion properly ourselves.
+function canvasPointerToGame(evt) {
+  var canvasElt = document.querySelector("canvas");
+  if (!canvasElt) {
+    return null;
+  }
+  var rect = canvasElt.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    return null;
+  }
+  return {
+    x: (evt.clientX - rect.left) * (GAME_WIDTH / rect.width),
+    y: (evt.clientY - rect.top) * (GAME_HEIGHT / rect.height)
+  };
+}
+
+function isOverRestart(x, y) {
+  if (!restart || !restart.visible) {
+    return false;
+  }
+  //a few px of padding makes the button easier to hit, especially on touch
+  var halfWidth = (restart.width * restart.scale) / 2 + 6;
+  var halfHeight = (restart.height * restart.scale) / 2 + 6;
+  return Math.abs(x - restart.x) <= halfWidth &&
+         Math.abs(y - restart.y) <= halfHeight;
+}
+
+function onCanvasPointerDown(evt) {
+  var point = canvasPointerToGame(evt);
+  if (point && isOverRestart(point.x, point.y)) {
+    restartRequested = true;
+  }
+}
+
 var GAME_WIDTH = 600;
 var GAME_HEIGHT = 200;
 
@@ -117,6 +172,12 @@ function preload(){
 function setup() {
   createCanvas(GAME_WIDTH, GAME_HEIGHT);
   fillScreen();
+
+  //pointerdown covers both mouse clicks and touch taps
+  var canvasElt = document.querySelector("canvas");
+  if (canvasElt) {
+    canvasElt.addEventListener("pointerdown", onCanvasPointerDown);
+  }
 
   // Let draw() run as fast as the browser will grant (matches the
   // monitor's native refresh rate - 60/144/240Hz - instead of a fixed cap).
@@ -229,7 +290,7 @@ function draw() {
     //change the trex animation
     trex.changeAnimation("collided",trex_collided);
 
-    if(mousePressedOver(restart)) {
+    if(restartRequested || keyDown("enter")) {
       reset();
     }
   }
@@ -318,11 +379,14 @@ function spawnObstacles() {
 
 function reset(){
   gameState = PLAY;
+  restartRequested = false;
   gameOver.visible = false;
   restart.visible = false;
 
-  obstaclesGroup.destroyEach();
-  cloudsGroup.destroyEach();
+  // destroyEach() calls a "destroy" method that does not exist on Sprite in
+  // this version of p5.play, so it threw and aborted the whole restart.
+  obstaclesGroup.removeSprites();
+  cloudsGroup.removeSprites();
 
   trex.changeAnimation("running",trex_running);
 
