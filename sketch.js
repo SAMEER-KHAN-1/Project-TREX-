@@ -26,6 +26,14 @@ var OBSTACLE_INTERVAL_MS = 1000;
 var CLOUD_LIFETIME_MS = (200 / 60) * 1000;
 var OBSTACLE_LIFETIME_MS = (300 / 60) * 1000;
 
+// Base scroll speed and how much faster it gets as the score climbs.
+var BASE_SPEED = 3.5;
+var SPEED_PER_100_SCORE = 1.5;
+
+function currentSpeed() {
+  return BASE_SPEED + SPEED_PER_100_SCORE * Math.floor(score) / 100;
+}
+
 if (!localStorage["HighestScore"]) {
   localStorage["HighestScore"] = 0;
 }
@@ -90,7 +98,7 @@ function setup() {
   ground = createSprite(200,180,400,20);
   ground.addImage("ground",groundImage);
   ground.x = ground.width /2;
-  ground.velocityX = -(6 + 3*score/100);
+  ground.velocityX = -BASE_SPEED;
 
   gameOver = createSprite(300,100);
   gameOver.addImage(gameOverImg);
@@ -119,7 +127,11 @@ function setup() {
 
 function draw() {
   //trex.debug = true;
-  background(150);
+  background(135, 206, 235); // sky blue
+  noStroke();
+  fill(222, 184, 135); // sandy ground
+  rect(0, 178, GAME_WIDTH, GAME_HEIGHT - 178);
+  fill(0);
   text("Score: "+ Math.floor(score), 500,50);
 
   // p5.js 0.8.0 has no built-in deltaTime, so track it ourselves. dtFactor
@@ -133,7 +145,7 @@ function draw() {
 
   if (gameState===PLAY){
     score = score + dtFactor;
-    ground.velocityX = -(6 + 3*Math.floor(score)/100) * dtFactor;
+    ground.velocityX = -currentSpeed() * dtFactor;
 
     if((keyDown("space") || touchIsDown) && trex.y >= 159) {
       trexVY = -12;
@@ -214,7 +226,7 @@ function spawnClouds() {
     cloud.y = Math.round(random(80,120));
     cloud.addImage(cloudImage);
     cloud.scale = 0.5;
-    cloud.baseVelocityX = -3;
+    cloud.baseVelocityX = -2;
     cloud.spawnTime = millis();
 
     //lifetime is managed manually via spawnTime/CLOUD_LIFETIME_MS above
@@ -235,7 +247,7 @@ function spawnObstacles() {
 
     var obstacle = createSprite(600,165,10,40);
     //obstacle.debug = true;
-    obstacle.baseVelocityX = -(6 + 3*Math.floor(score)/100);
+    obstacle.baseVelocityX = -currentSpeed();
     obstacle.spawnTime = millis();
 
     //generate random obstacles
