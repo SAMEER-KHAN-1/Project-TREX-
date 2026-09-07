@@ -146,7 +146,14 @@ function draw() {
       ground.x = ground.width/2;
     }
 
-    trex.collide(invisibleGround);
+    // trex.collide() zeroes the sprite's real velocity when it rests on the
+    // ground, but that correction never reached our own trexVY accumulator -
+    // gravity kept piling up every frame until the trex tunneled straight
+    // through the thin ground collider. Reset trexVY too whenever grounded.
+    var grounded = trex.collide(invisibleGround);
+    if (grounded) {
+      trexVY = 0;
+    }
     updateClouds(dtFactor);
     updateObstacles(dtFactor);
     spawnClouds();
