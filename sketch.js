@@ -12,8 +12,18 @@ var score=0;
 
 var gameOver, restart;
 
+var touchIsDown = false;
+
 if (!localStorage["HighestScore"]) {
   localStorage["HighestScore"] = 0;
+}
+
+function touchStarted() {
+  touchIsDown = true;
+}
+
+function touchEnded() {
+  touchIsDown = false;
 }
 
 function preload(){
