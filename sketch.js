@@ -19,20 +19,34 @@ var touchIsDown = false;
 // and spawn rate stay identical whether the display runs at 60Hz, 144Hz or 240Hz.
 var trexVY = 0;
 var lastFrameMillis = 0;
-var lastCloudSpawnTime = 0;
-var lastObstacleSpawnTime = 0;
-var CLOUD_INTERVAL_MS = 1000;
-var OBSTACLE_INTERVAL_MS = 1000;
-var CLOUD_LIFETIME_MS = (200 / 60) * 1000;
-var OBSTACLE_LIFETIME_MS = (300 / 60) * 1000;
 
-// Base scroll speed and how much faster it gets as the score climbs.
-var BASE_SPEED = 3.5;
-var SPEED_PER_100_SCORE = 1.5;
+// Global slow-motion factor - this is the knob to turn for overall pace.
+// It scales time itself, so scrolling, gravity, the jump arc and the score
+// all slow down together. Lowering the scroll speed on its own would NOT
+// work: the jump lasts a fixed 30 frames, so a slower world means the trex
+// lands on top of the wider cacti instead of clearing them.
+var TIME_SCALE = 0.12;
+
+// Scroll speed, how much faster it gets as the score climbs, and a ceiling
+// so it never runs away. These are in "per 60fps reference frame" units,
+// before TIME_SCALE is applied. BASE_SPEED stays at the original 6 so the
+// jump arc still clears the widest cactus; TIME_SCALE does the slowing down.
+var BASE_SPEED = 6;
+var SPEED_PER_100_SCORE = 0.15;
+var MAX_SPEED = 12;
+var CLOUD_SPEED = 3;
 
 function currentSpeed() {
-  return BASE_SPEED + SPEED_PER_100_SCORE * Math.floor(score) / 100;
+  return Math.min(BASE_SPEED + SPEED_PER_100_SCORE * Math.floor(score) / 100, MAX_SPEED);
 }
+
+// Obstacles and clouds are spaced by distance travelled, not by a timer, so
+// the gaps between them stay the same no matter how slow or fast the game runs.
+var OBSTACLE_GAP_PX = 350;
+var CLOUD_GAP_PX = 250;
+var distanceTravelled = 0;
+var lastObstacleSpawnDistance = 0;
+var lastCloudSpawnDistance = 0;
 
 if (!localStorage["HighestScore"]) {
   localStorage["HighestScore"] = 0;
@@ -121,8 +135,9 @@ function setup() {
   score = 0;
   trexVY = 0;
   lastFrameMillis = millis();
-  lastCloudSpawnTime = millis();
-  lastObstacleSpawnTime = millis();
+  distanceTravelled = 0;
+  lastObstacleSpawnDistance = 0;
+  lastCloudSpawnDistance = 0;
 }
 
 function draw() {
@@ -141,11 +156,12 @@ function draw() {
   var now = millis();
   var dt = now - lastFrameMillis;
   lastFrameMillis = now;
-  var dtFactor = constrain(dt / (1000 / 60), 0, 3);
+  var dtFactor = constrain(dt / (1000 / 60), 0, 3) * TIME_SCALE;
 
   if (gameState===PLAY){
     score = score + dtFactor;
     ground.velocityX = -currentSpeed() * dtFactor;
+    distanceTravelled = distanceTravelled + currentSpeed() * dtFactor;
 
     if((keyDown("space") || touchIsDown) && trex.y >= 159) {
       trexVY = -12;
@@ -198,11 +214,13 @@ function draw() {
   drawSprites();
 }
 
+// Sprites are removed once they leave the screen rather than after a fixed
+// time, so a slower game never makes them vanish while still in view.
 function updateClouds(dtFactor) {
   for (var i = cloudsGroup.length - 1; i >= 0; i--) {
     var cloud = cloudsGroup[i];
     cloud.velocityX = cloud.baseVelocityX * dtFactor;
-    if (millis() - cloud.spawnTime > CLOUD_LIFETIME_MS) {
+    if (cloud.x < -100) {
       cloud.remove();
     }
   }
@@ -212,24 +230,23 @@ function updateObstacles(dtFactor) {
   for (var i = obstaclesGroup.length - 1; i >= 0; i--) {
     var obstacle = obstaclesGroup[i];
     obstacle.velocityX = obstacle.baseVelocityX * dtFactor;
-    if (millis() - obstacle.spawnTime > OBSTACLE_LIFETIME_MS) {
+    if (obstacle.x < -100) {
       obstacle.remove();
     }
   }
 }
 
 function spawnClouds() {
-  if (millis() - lastCloudSpawnTime >= CLOUD_INTERVAL_MS) {
-    lastCloudSpawnTime = millis();
+  if (distanceTravelled - lastCloudSpawnDistance >= CLOUD_GAP_PX) {
+    lastCloudSpawnDistance = distanceTravelled;
 
     var cloud = createSprite(600,120,40,10);
     cloud.y = Math.round(random(80,120));
     cloud.addImage(cloudImage);
     cloud.scale = 0.5;
-    cloud.baseVelocityX = -2;
-    cloud.spawnTime = millis();
+    cloud.baseVelocityX = -CLOUD_SPEED;
 
-    //lifetime is managed manually via spawnTime/CLOUD_LIFETIME_MS above
+    //removed once off-screen by updateClouds() instead of by lifetime
     cloud.lifetime = -1;
 
     //adjust the depth
@@ -242,13 +259,12 @@ function spawnClouds() {
 }
 
 function spawnObstacles() {
-  if (millis() - lastObstacleSpawnTime >= OBSTACLE_INTERVAL_MS) {
-    lastObstacleSpawnTime = millis();
+  if (distanceTravelled - lastObstacleSpawnDistance >= OBSTACLE_GAP_PX) {
+    lastObstacleSpawnDistance = distanceTravelled;
 
     var obstacle = createSprite(600,165,10,40);
     //obstacle.debug = true;
     obstacle.baseVelocityX = -currentSpeed();
-    obstacle.spawnTime = millis();
 
     //generate random obstacles
     var rand = Math.round(random(1,6));
@@ -268,7 +284,7 @@ function spawnObstacles() {
       default: break;
     }
 
-    //assign scale to the obstacle; lifetime is managed manually above
+    //removed once off-screen by updateObstacles() instead of by lifetime
     obstacle.scale = 0.5;
     obstacle.lifetime = -1;
     //add each obstacle to the group
@@ -293,6 +309,7 @@ function reset(){
 
   score = 0;
   trexVY = 0;
-  lastCloudSpawnTime = millis();
-  lastObstacleSpawnTime = millis();
+  distanceTravelled = 0;
+  lastObstacleSpawnDistance = 0;
+  lastCloudSpawnDistance = 0;
 }
