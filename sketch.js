@@ -40,6 +40,20 @@ var CLOUD_SPEED = 3;
 // cactus for ~21 frames while that cactus overlaps it for ~20, leaving
 // almost no margin for error; -13.5 opens that up to a fair window.
 var JUMP_VELOCITY = -13.5;
+var GRAVITY = 0.8;
+
+// Extra downward pull for the fast-fall keys. There is no ducking sprite in
+// this project, so down/S drops the trex out of a jump quickly instead.
+var FAST_FALL_ACCEL = 1.6;
+
+// Jump: space, up arrow, W, or a screen tap. Fast-fall: down arrow or S.
+function jumpPressed() {
+  return keyDown("space") || keyDown("up") || keyDown("w") || touchIsDown;
+}
+
+function fastFallPressed() {
+  return keyDown("down") || keyDown("s");
+}
 
 function currentSpeed() {
   return Math.min(BASE_SPEED + SPEED_PER_100_SCORE * Math.floor(score) / 100, MAX_SPEED);
@@ -168,11 +182,16 @@ function draw() {
     ground.velocityX = -currentSpeed() * dtFactor;
     distanceTravelled = distanceTravelled + currentSpeed() * dtFactor;
 
-    if((keyDown("space") || touchIsDown) && trex.y >= 159) {
+    if(jumpPressed() && trex.y >= 159) {
       trexVY = JUMP_VELOCITY;
     }
 
-    trexVY = trexVY + 0.8 * dtFactor;
+    //fast-fall only makes sense while off the ground
+    if(fastFallPressed() && trex.y < 159) {
+      trexVY = trexVY + FAST_FALL_ACCEL * dtFactor;
+    }
+
+    trexVY = trexVY + GRAVITY * dtFactor;
     trex.velocityY = trexVY * dtFactor;
 
     if (ground.x < 0){
