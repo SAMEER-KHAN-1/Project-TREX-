@@ -25,16 +25,21 @@ var lastFrameMillis = 0;
 // all slow down together. Lowering the scroll speed on its own would NOT
 // work: the jump lasts a fixed 30 frames, so a slower world means the trex
 // lands on top of the wider cacti instead of clearing them.
-var TIME_SCALE = 0.12;
+var TIME_SCALE = 0.5;
 
 // Scroll speed, how much faster it gets as the score climbs, and a ceiling
 // so it never runs away. These are in "per 60fps reference frame" units,
 // before TIME_SCALE is applied. BASE_SPEED stays at the original 6 so the
 // jump arc still clears the widest cactus; TIME_SCALE does the slowing down.
 var BASE_SPEED = 6;
-var SPEED_PER_100_SCORE = 0.15;
+var SPEED_PER_100_SCORE = 0.1;
 var MAX_SPEED = 12;
 var CLOUD_SPEED = 3;
+
+// Jump impulse. At -12 the trex is only high enough to clear the widest
+// cactus for ~21 frames while that cactus overlaps it for ~20, leaving
+// almost no margin for error; -13.5 opens that up to a fair window.
+var JUMP_VELOCITY = -13.5;
 
 function currentSpeed() {
   return Math.min(BASE_SPEED + SPEED_PER_100_SCORE * Math.floor(score) / 100, MAX_SPEED);
@@ -164,7 +169,7 @@ function draw() {
     distanceTravelled = distanceTravelled + currentSpeed() * dtFactor;
 
     if((keyDown("space") || touchIsDown) && trex.y >= 159) {
-      trexVY = -12;
+      trexVY = JUMP_VELOCITY;
     }
 
     trexVY = trexVY + 0.8 * dtFactor;
