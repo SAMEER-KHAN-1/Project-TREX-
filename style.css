@@ -1,9 +1,11 @@
 html, body {
   margin: 0;
   padding: 0;
+  width: 100%;
   height: 100%;
   background: #f7f7f7;
   touch-action: none;
+  overflow: hidden;
 }
 body {
   display: flex;
@@ -12,6 +14,4 @@ body {
 }
 canvas {
   display: block;
-  max-width: 100%;
-  height: auto;
 }

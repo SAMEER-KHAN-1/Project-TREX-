@@ -26,6 +26,19 @@ function touchEnded() {
   touchIsDown = false;
 }
 
+function fillScreen() {
+  var scaleFactor = Math.min(windowWidth / GAME_WIDTH, windowHeight / GAME_HEIGHT);
+  var canvasElt = document.querySelector("canvas");
+  if (canvasElt) {
+    canvasElt.style.width = (GAME_WIDTH * scaleFactor) + "px";
+    canvasElt.style.height = (GAME_HEIGHT * scaleFactor) + "px";
+  }
+}
+
+function windowResized() {
+  fillScreen();
+}
+
 function preload(){
   trex_running =   loadAnimation("trex1.png","trex3.png","trex4.png");
   trex_collided = loadAnimation("trex_collided.png");
@@ -45,9 +58,13 @@ function preload(){
   restartImg = loadImage("restart.png");
 }
 
+var GAME_WIDTH = 600;
+var GAME_HEIGHT = 200;
+
 function setup() {
-  createCanvas(600, 200);
-  
+  createCanvas(GAME_WIDTH, GAME_HEIGHT);
+  fillScreen();
+
   trex = createSprite(50,180,20,50);
   
   trex.addAnimation("running", trex_running);
