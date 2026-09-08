@@ -111,11 +111,36 @@ function currentSpeed() {
 
 // Obstacles and clouds are spaced by distance travelled, not by a timer, so
 // the gaps between them stay the same no matter how slow or fast the game runs.
-var OBSTACLE_GAP_PX = 350;
-var CLOUD_GAP_PX = 250;
+// The gap is re-rolled after every spawn instead of being a fixed number,
+// which is what made the rhythm feel metronomic.
+//
+// It is measured in "jump lengths" rather than raw pixels: a jump covers
+// airtime * speed pixels of ground, so as the game speeds up a fixed pixel
+// gap would quietly become unclearable (at MAX_SPEED a single jump covers
+// ~405px, more than the old fixed 350px gap). Anchoring to jump length keeps
+// the spacing honest at every speed.
+var OBSTACLE_GAP_MIN_JUMPS = 1.35;
+var OBSTACLE_GAP_MAX_JUMPS = 2.8;
+var CLOUD_GAP_MIN_PX = 120;
+var CLOUD_GAP_MAX_PX = 400;
 var distanceTravelled = 0;
 var lastObstacleSpawnDistance = 0;
 var lastCloudSpawnDistance = 0;
+var nextObstacleGap = 0;
+var nextCloudGap = 0;
+//width of the obstacle just spawned, so wide cactus clusters earn extra room
+var lastObstacleWidth = 0;
+
+function rollObstacleGap() {
+  var airtimeFrames = 2 * Math.abs(JUMP_VELOCITY) / GRAVITY;
+  var jumpDistance = airtimeFrames * currentSpeed();
+  return lastObstacleWidth +
+         jumpDistance * random(OBSTACLE_GAP_MIN_JUMPS, OBSTACLE_GAP_MAX_JUMPS);
+}
+
+function rollCloudGap() {
+  return random(CLOUD_GAP_MIN_PX, CLOUD_GAP_MAX_PX);
+}
 
 if (!localStorage["HighestScore"]) {
   localStorage["HighestScore"] = 0;
@@ -268,6 +293,9 @@ function setup() {
   distanceTravelled = 0;
   lastObstacleSpawnDistance = 0;
   lastCloudSpawnDistance = 0;
+  lastObstacleWidth = 0;
+  nextObstacleGap = rollObstacleGap();
+  nextCloudGap = rollCloudGap();
 }
 
 function draw() {
@@ -391,14 +419,16 @@ function updateObstacles(dtFactor) {
 }
 
 function spawnClouds() {
-  if (distanceTravelled - lastCloudSpawnDistance >= CLOUD_GAP_PX) {
+  if (distanceTravelled - lastCloudSpawnDistance >= nextCloudGap) {
     lastCloudSpawnDistance = distanceTravelled;
+    nextCloudGap = rollCloudGap();
 
     var cloud = createSprite(600,120,40,10);
-    cloud.y = Math.round(random(80,120));
+    cloud.y = Math.round(random(65,125));
     cloud.addImage(cloudImage);
-    cloud.scale = 0.5;
-    cloud.baseVelocityX = -CLOUD_SPEED;
+    //vary size and drift speed a little so the sky reads as having depth
+    cloud.scale = random(0.35, 0.6);
+    cloud.baseVelocityX = -CLOUD_SPEED * random(0.65, 1.25);
 
     //removed once off-screen by updateClouds() instead of by lifetime
     cloud.lifetime = -1;
@@ -413,15 +443,18 @@ function spawnClouds() {
 }
 
 function spawnObstacles() {
-  if (distanceTravelled - lastObstacleSpawnDistance >= OBSTACLE_GAP_PX) {
+  if (distanceTravelled - lastObstacleSpawnDistance >= nextObstacleGap) {
     lastObstacleSpawnDistance = distanceTravelled;
 
     var obstacle = createSprite(600,165,10,40);
     //obstacle.debug = true;
     obstacle.baseVelocityX = -currentSpeed();
 
-    //generate random obstacles
-    var rand = Math.round(random(1,6));
+    // Math.round(random(1,6)) only gave types 1 and 6 half the chance of the
+    // others (round maps a 0.5-wide band to each end but a full 1.0-wide band
+    // to 2-5), so the same middle cacti kept showing up. floor(random(1,7))
+    // picks all six evenly.
+    var rand = Math.floor(random(1,7));
     switch(rand) {
       case 1: obstacle.addImage(obstacle1);
               break;
@@ -443,6 +476,9 @@ function spawnObstacles() {
     obstacle.lifetime = -1;
     //add each obstacle to the group
     obstaclesGroup.add(obstacle);
+
+    lastObstacleWidth = obstacle.width * obstacle.scale;
+    nextObstacleGap = rollObstacleGap();
   }
 }
 
@@ -470,4 +506,7 @@ function reset(){
   distanceTravelled = 0;
   lastObstacleSpawnDistance = 0;
   lastCloudSpawnDistance = 0;
+  lastObstacleWidth = 0;
+  nextObstacleGap = rollObstacleGap();
+  nextCloudGap = rollCloudGap();
 }
