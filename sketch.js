@@ -42,17 +42,67 @@ var CLOUD_SPEED = 3;
 var JUMP_VELOCITY = -13.5;
 var GRAVITY = 0.8;
 
-// Extra downward pull for the fast-fall keys. There is no ducking sprite in
-// this project, so down/S drops the trex out of a jump quickly instead.
+// Extra downward pull for the fast-fall keys, used while airborne.
 var FAST_FALL_ACCEL = 1.6;
 
-// Jump: space, up arrow, W, or a screen tap. Fast-fall: down arrow or S.
+// Jump: space, up arrow, W, or a screen tap. Duck/fast-fall: down arrow or S
+// (ducks like Chrome's dino while grounded, fast-falls while airborne).
 function jumpPressed() {
   return keyDown("space") || keyDown("up") || keyDown("w") || touchIsDown;
 }
 
-function fastFallPressed() {
+function duckPressed() {
   return keyDown("down") || keyDown("s");
+}
+
+// There is no separate duck sprite in this project's assets, so the crouch
+// is faked by squashing the running sprite shorter and wider, like Chrome's
+// dino. p5.play normally recomputes a sprite's width/height from its raw
+// animation frame every time the frame changes, which would undo our squash
+// a few frames later - _fixedSpriteAnimationFrameSizes turns that off so a
+// manually-set width/height sticks. It's engaged lazily on the first duck
+// (not in setup()) so trex.width/height are already correct real values,
+// not the createSprite() placeholder box, when they get frozen.
+var CROUCH_WIDTH_FACTOR = 1.35;
+var CROUCH_HEIGHT_FACTOR = 0.55;
+var isCrouching = false;
+var trexStandingWidth = null;
+var trexStandingHeight = null;
+
+function setCrouching(crouch) {
+  if (crouch === isCrouching) {
+    return;
+  }
+  isCrouching = crouch;
+
+  if (trexStandingWidth === null) {
+    trexStandingWidth = trex.width;
+    trexStandingHeight = trex.height;
+    p5.instance._fixedSpriteAnimationFrameSizes = true;
+
+    // setCollider('rectangle') with no size args re-derives the hitbox from
+    // the RAW animation frame every frame (ignoring our width/height entirely),
+    // which fought our crouch box and made collisions unreliable. Passing
+    // explicit dimensions freezes a custom size instead, BUT the collider's
+    // transform re-applies trex.scale * trex._horizontalStretch (resp.
+    // _verticalStretch) every frame once _fixedSpriteAnimationFrameSizes is
+    // on - that stretch factor is exactly what turns the standing size into
+    // the crouched one, so setting the collider once here in RAW pre-scale
+    // pixels (standing size / scale) makes it self-adjust correctly to both
+    // states automatically, with no need to touch it again on every toggle.
+    trex.setCollider('rectangle', 0, 0, trexStandingWidth / trex.scale, trexStandingHeight / trex.scale);
+  }
+
+  var previousHeight = trex.height;
+  if (crouch) {
+    trex.width = trexStandingWidth * CROUCH_WIDTH_FACTOR;
+    trex.height = trexStandingHeight * CROUCH_HEIGHT_FACTOR;
+  } else {
+    trex.width = trexStandingWidth;
+    trex.height = trexStandingHeight;
+  }
+  //re-anchor so the feet stay on the ground instead of the sprite shrinking/growing from its center
+  trex.y += (previousHeight - trex.height) / 2;
 }
 
 function currentSpeed() {
@@ -243,12 +293,17 @@ function draw() {
     ground.velocityX = -currentSpeed() * dtFactor;
     distanceTravelled = distanceTravelled + currentSpeed() * dtFactor;
 
-    if(jumpPressed() && trex.y >= 159) {
+    var airborne = trex.y < 159;
+    var jumpedThisFrame = false;
+
+    //jump takes priority over duck: a held duck key must not cancel a jump
+    if(jumpPressed() && !airborne && !isCrouching) {
       trexVY = JUMP_VELOCITY;
+      jumpedThisFrame = true;
     }
 
     //fast-fall only makes sense while off the ground
-    if(fastFallPressed() && trex.y < 159) {
+    if(duckPressed() && airborne) {
       trexVY = trexVY + FAST_FALL_ACCEL * dtFactor;
     }
 
@@ -267,6 +322,19 @@ function draw() {
     if (grounded) {
       trexVY = 0;
     }
+
+    // Duck like Chrome's dino while grounded, standing back up when released.
+    // Gated on the same trex.y threshold the jump uses, not on `grounded`:
+    // `grounded` only means "trex.collide() found overlap to correct this
+    // frame", and setCrouching() teleports the sprite to exactly zero
+    // penetration against the ground - so the very next frame there is
+    // nothing to correct, grounded reads false, and using it here made the
+    // crouch cancel itself one frame after starting.
+    if (!airborne && !jumpedThisFrame) {
+      setCrouching(duckPressed());
+    } else if (airborne) {
+      setCrouching(false);
+    }
     updateClouds(dtFactor);
     updateObstacles(dtFactor);
     spawnClouds();
@@ -274,6 +342,7 @@ function draw() {
 
     if(obstaclesGroup.isTouching(trex)){
         gameState = END;
+        setCrouching(false);
     }
   }
   else if (gameState === END) {
@@ -382,6 +451,7 @@ function reset(){
   restartRequested = false;
   gameOver.visible = false;
   restart.visible = false;
+  setCrouching(false);
 
   // destroyEach() calls a "destroy" method that does not exist on Sprite in
   // this version of p5.play, so it threw and aborted the whole restart.
