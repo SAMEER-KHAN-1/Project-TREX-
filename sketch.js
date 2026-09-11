@@ -519,12 +519,73 @@ function setup() {
   lastObstacleWidth = 0;
   nextObstacleGap = rollObstacleGap();
   nextCloudGap = rollCloudGap();
+  nextScoreMilestone = SCORE_MILESTONE_INTERVAL;
+}
+
+// ---------------------------------------------------------------------------
+// Sound effects
+//
+// The project ships no audio assets, so these are synthesized with the Web
+// Audio API instead of loaded from files. Browsers refuse to let audio play
+// until a real user gesture has happened, so the AudioContext is created
+// lazily on first use (from inside playTone(), called from a jump/score/death
+// that only ever happens as a result of a keypress or tap) rather than in
+// setup(), where it would stay permanently suspended.
+// ---------------------------------------------------------------------------
+var audioCtx = null;
+
+function getAudioContext() {
+  var AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    return null;
+  }
+  if (!audioCtx) {
+    audioCtx = new AudioContextClass();
+  }
+  if (audioCtx.state === "suspended") {
+    audioCtx.resume();
+  }
+  return audioCtx;
+}
+
+function playTone(frequency, durationSeconds, type) {
+  var ctx = getAudioContext();
+  if (!ctx) {
+    return;
+  }
+  var oscillator = ctx.createOscillator();
+  var gain = ctx.createGain();
+  oscillator.type = type || "square";
+  oscillator.frequency.value = frequency;
+  //quick fade-out instead of a hard stop, so each blip doesn't click
+  gain.gain.setValueAtTime(0.08, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + durationSeconds);
+  oscillator.connect(gain);
+  gain.connect(ctx.destination);
+  oscillator.start();
+  oscillator.stop(ctx.currentTime + durationSeconds);
+}
+
+function playJumpSound() {
+  playTone(520, 0.09);
+}
+
+function playScoreMilestoneSound() {
+  playTone(880, 0.12);
+}
+
+function playDeathSound() {
+  playTone(160, 0.35, "sawtooth");
 }
 
 // Chrome's dino flips to a dark palette for a stretch every so many points,
 // then back to day, alternating for as long as you survive. Matches Chrome's
 // own 700-point interval.
 var NIGHT_MODE_SCORE_INTERVAL = 700;
+
+// Matches Chrome's dino: a short beep every 100 points.
+var SCORE_MILESTONE_INTERVAL = 100;
+var nextScoreMilestone = SCORE_MILESTONE_INTERVAL;
 
 function isNightMode() {
   return Math.floor(score / NIGHT_MODE_SCORE_INTERVAL) % 2 === 1;
@@ -559,6 +620,10 @@ function draw() {
     if (Math.floor(score) > highScore) {
       highScore = Math.floor(score);
     }
+    if (score >= nextScoreMilestone) {
+      playScoreMilestoneSound();
+      nextScoreMilestone += SCORE_MILESTONE_INTERVAL;
+    }
     ground.velocityX = -currentSpeed() * dtFactor;
     distanceTravelled = distanceTravelled + currentSpeed() * dtFactor;
 
@@ -569,6 +634,7 @@ function draw() {
     if(jumpPressed() && !airborne && !isCrouching) {
       trexVY = JUMP_VELOCITY;
       jumpedThisFrame = true;
+      playJumpSound();
     }
 
     //fast-fall only makes sense while off the ground
@@ -612,6 +678,7 @@ function draw() {
     if(trexHitsAnyObstacle()){
         gameState = END;
         setCrouching(false);
+        playDeathSound();
         // Seed the "was this key already down" baseline with whatever the
         // player happens to be holding at the moment of death (very often
         // the jump key, since that's what you'd be pressing mid-obstacle).
@@ -784,4 +851,5 @@ function reset(){
   lastObstacleWidth = 0;
   nextObstacleGap = rollObstacleGap();
   nextCloudGap = rollCloudGap();
+  nextScoreMilestone = SCORE_MILESTONE_INTERVAL;
 }
