@@ -344,7 +344,11 @@ function isDuckTouchPoint(clientX, clientY) {
 
 function touchStarted(e) {
   var touch = e && e.touches && e.touches[0];
-  if (touch && isDuckTouchPoint(touch.clientX, touch.clientY)) {
+  // The jump/duck zone split only makes sense during actual gameplay - on
+  // the game-over screen any tap should restart, same as before the duck
+  // zone existed, instead of a tap on the bottom half being swallowed as a
+  // duck touch and silently doing nothing.
+  if (gameState === PLAY && touch && isDuckTouchPoint(touch.clientX, touch.clientY)) {
     touchDuckIsDown = true;
   } else {
     touchIsDown = true;
