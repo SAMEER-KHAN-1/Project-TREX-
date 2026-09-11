@@ -625,7 +625,7 @@ function handlePauseToggle() {
   pauseKeyWasDown = pauseKeyIsDown;
 }
 
-function playTone(frequency, durationSeconds, type) {
+function playTone(frequency, durationSeconds, type, delaySeconds) {
   if (soundMuted) {
     return;
   }
@@ -637,13 +637,16 @@ function playTone(frequency, durationSeconds, type) {
   var gain = ctx.createGain();
   oscillator.type = type || "square";
   oscillator.frequency.value = frequency;
+  //scheduled on the audio clock rather than with setTimeout, so multi-note
+  //sounds stay tightly timed even when the page is busy
+  var startAt = ctx.currentTime + (delaySeconds || 0);
   //quick fade-out instead of a hard stop, so each blip doesn't click
-  gain.gain.setValueAtTime(0.08, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + durationSeconds);
+  gain.gain.setValueAtTime(0.08, startAt);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + durationSeconds);
   oscillator.connect(gain);
   gain.connect(ctx.destination);
-  oscillator.start();
-  oscillator.stop(ctx.currentTime + durationSeconds);
+  oscillator.start(startAt);
+  oscillator.stop(startAt + durationSeconds);
 }
 
 // iOS Safari only actually starts an AudioContext when resume() is called
@@ -663,8 +666,13 @@ function playJumpSound() {
   playTone(520, 0.09);
 }
 
+// Score climbs ~30 points a second, so this fires every ~3 seconds no matter
+// what the trex is doing - often mid-descent. As a single square blip like
+// the jump sound, it read as a mistimed "landing" sound. A rising two-note
+// triangle chime is unmistakably its own thing.
 function playScoreMilestoneSound() {
-  playTone(880, 0.12);
+  playTone(784, 0.08, "triangle");
+  playTone(1175, 0.14, "triangle", 0.08);
 }
 
 function playDeathSound() {
