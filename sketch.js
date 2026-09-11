@@ -459,6 +459,9 @@ function onCanvasPointerDown(evt) {
 var GAME_WIDTH = 600;
 var GAME_HEIGHT = 200;
 
+//distance from the true top-right corner of the canvas to the score text
+var SCORE_MARGIN = 18;
+
 // Gameplay happens in a fixed 600x200 strip, but real screens are nowhere
 // near 3:1, so scaling just that strip to fit left big blank bars above and
 // below it. Instead the canvas is made as tall as the screen's shape needs -
@@ -881,16 +884,28 @@ function draw() {
   //from the ground line all the way to the bottom of the screen
   rect(0, viewOffsetY + 178, width, height - (viewOffsetY + 178));
 
+  // Text flips at the fade's midpoint instead of blending with it: a mid-grey
+  // score over the mid-fade sky would be close to unreadable for a second.
+  var textShade = nightAmount > 0.5 ? 255 : 0;
+
+  // Pinned to the real screen corner (not the 600x200 strip) so it stays in
+  // the top-right border regardless of how much extra sky fullscreen adds
+  // above the strip. Isolated in its own push/pop so the cartoony font and
+  // right-alignment don't leak into the MUTED/PAUSED text drawn below.
+  push();
+  textFont("Bangers, cursive");
+  textAlign(RIGHT, TOP);
+  textSize(28);
+  fill(textShade);
+  text("HI " + padScore(highScore) + "   " + padScore(score), width - SCORE_MARGIN, SCORE_MARGIN);
+  pop();
+
   // Everything from here down to drawSprites() is drawn in gameplay-strip
   // coordinates (0-600 x 0-200), shifted to wherever the strip sits on screen.
   push();
   translate(0, viewOffsetY);
 
-  // Text flips at the fade's midpoint instead of blending with it: a mid-grey
-  // score over the mid-fade sky would be close to unreadable for a second.
-  var textShade = nightAmount > 0.5 ? 255 : 0;
   fill(textShade);
-  text("HI " + padScore(highScore) + "   " + padScore(score), 430, 50);
 
   handleMuteToggle();
   if (soundMuted) {
