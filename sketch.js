@@ -602,6 +602,19 @@ function playTone(frequency, durationSeconds, type) {
   oscillator.stop(ctx.currentTime + durationSeconds);
 }
 
+// iOS Safari only actually starts an AudioContext when resume() is called
+// synchronously inside a real user-gesture event handler (keydown,
+// touchstart, click) - not from a later requestAnimationFrame callback, even
+// one triggered by that same gesture. playJumpSound() etc. call
+// getAudioContext() from inside draw()'s frame loop, which is too late for
+// Safari, so also unlock it directly from the very first real input event.
+function unlockAudioContext() {
+  getAudioContext();
+}
+document.addEventListener("keydown", unlockAudioContext, { once: true });
+document.addEventListener("touchstart", unlockAudioContext, { once: true });
+document.addEventListener("mousedown", unlockAudioContext, { once: true });
+
 function playJumpSound() {
   playTone(520, 0.09);
 }
