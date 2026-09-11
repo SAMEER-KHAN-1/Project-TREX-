@@ -726,6 +726,26 @@ function draw() {
     ground.velocityX = -currentSpeed() * dtFactor;
     distanceTravelled = distanceTravelled + currentSpeed() * dtFactor;
 
+    if (ground.x < 0){
+      ground.x = ground.width/2;
+    }
+
+    // trex.collide() zeroes the sprite's real velocity when it rests on the
+    // ground, but that correction never reached our own trexVY accumulator -
+    // gravity kept piling up every frame until the trex tunneled straight
+    // through the thin ground collider. Reset trexVY too whenever grounded.
+    //
+    // This must run BEFORE the jump below, not after it. A resting trex sinks
+    // a hair into the ground every frame, so collide() reports true on roughly
+    // every other frame - and when a jump started on one of those frames, the
+    // reset here (plus collide()'s own zero-bounce on the sprite's velocity)
+    // wiped the jump velocity out the instant it was set. The jump sound
+    // played, but the trex never left the ground.
+    var grounded = trex.collide(invisibleGround);
+    if (grounded) {
+      trexVY = 0;
+    }
+
     var airborne = trex.y < 159;
     var jumpedThisFrame = false;
 
@@ -751,19 +771,6 @@ function draw() {
 
     trexVY = trexVY + GRAVITY * dtFactor;
     trex.velocityY = trexVY * dtFactor;
-
-    if (ground.x < 0){
-      ground.x = ground.width/2;
-    }
-
-    // trex.collide() zeroes the sprite's real velocity when it rests on the
-    // ground, but that correction never reached our own trexVY accumulator -
-    // gravity kept piling up every frame until the trex tunneled straight
-    // through the thin ground collider. Reset trexVY too whenever grounded.
-    var grounded = trex.collide(invisibleGround);
-    if (grounded) {
-      trexVY = 0;
-    }
 
     // Duck like Chrome's dino while grounded, standing back up when released.
     // Gated on the same trex.y threshold the jump uses, not on `grounded`:
