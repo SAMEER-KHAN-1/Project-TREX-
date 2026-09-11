@@ -795,7 +795,7 @@ function isNightMode() {
 // 0 = full day, 1 = full night. Eases toward whatever isNightMode() says over
 // DAY_NIGHT_TRANSITION_MS of real time instead of snapping, and only advances
 // while playing, so pausing or dying freezes a fade part-way through.
-var DAY_NIGHT_TRANSITION_MS = 3000;
+var DAY_NIGHT_TRANSITION_MS = 1000;
 var nightAmount = 0;
 
 var DAY_SKY = [135, 206, 235];
@@ -890,12 +890,20 @@ function draw() {
 
   // Pinned to the real screen corner (not the 600x200 strip) so it stays in
   // the top-right border regardless of how much extra sky fullscreen adds
-  // above the strip. Isolated in its own push/pop so the cartoony font and
+  // above the strip. Isolated in its own push/pop so the font and
   // right-alignment don't leak into the MUTED/PAUSED text drawn below.
+  //
+  // "Press Start 2P" - a true monospace pixel font, matching the retro
+  // arcade digit display the real Chrome dino uses. Monospace matters here
+  // beyond just looking right: Bangers (tried first) has different widths
+  // per digit, so as the score changed, the right-aligned text's rendered
+  // width kept changing and the whole line visibly shifted left and right
+  // every time a digit changed. Every character in a monospace font has the
+  // same advance width, so that can't happen here.
   push();
-  textFont("Bangers, cursive");
+  textFont('"Press Start 2P", monospace');
   textAlign(RIGHT, TOP);
-  textSize(28);
+  textSize(16);
   fill(textShade);
   text("HI " + padScore(highScore) + "   " + padScore(score), width - SCORE_MARGIN, SCORE_MARGIN);
   pop();
