@@ -261,6 +261,10 @@ function trexHitsAnyObstacle() {
   return false;
 }
 
+// Where an obstacle's bottom edge should land, in world y - matches where
+// the trex's own feet rest (bottom = trex.y + trex.height/2 ≈ 185).
+var GROUND_SURFACE_Y = 185;
+
 // Obstacles and clouds are spaced by distance travelled, not by a timer, so
 // the gaps between them stay the same no matter how slow or fast the game runs.
 // The gap is re-rolled after every spawn instead of being a fixed number,
@@ -661,6 +665,15 @@ function spawnObstacles() {
     //removed once off-screen by updateObstacles() instead of by lifetime
     obstacle.scale = 0.5;
     obstacle.lifetime = -1;
+
+    // All six obstacle images are spawned at the same fixed y regardless of
+    // their actual height (35px drawn for obstacle1-3, 50px for obstacle4-6),
+    // so the short cacti floated visibly above the ground line while the
+    // tall ones sank into it. Re-anchor so every obstacle's bottom lands on
+    // the same ground surface, matching where the trex's own feet rest.
+    var drawnHeight = obstacle.animation.getFrameImage().height * Math.abs(obstacle._getScaleY());
+    obstacle.y = GROUND_SURFACE_Y - drawnHeight / 2;
+
     //add each obstacle to the group
     obstaclesGroup.add(obstacle);
 
