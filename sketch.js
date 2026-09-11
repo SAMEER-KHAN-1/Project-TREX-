@@ -548,7 +548,43 @@ function getAudioContext() {
   return audioCtx;
 }
 
+// Sound has no opt-out otherwise, and it plays automatically the moment
+// someone jumps - "M" toggles it, remembered across sessions the same way
+// as the high score (and guarded against localStorage throwing for the
+// same reason: see readHighScore()/saveHighScore()).
+function readMuted() {
+  try {
+    return localStorage["SoundMuted"] === "true";
+  } catch (e) {
+    return false;
+  }
+}
+
+function saveMuted(value) {
+  try {
+    localStorage["SoundMuted"] = value ? "true" : "false";
+  } catch (e) {
+    //storage unavailable - mute preference just won't survive a reload
+  }
+}
+
+var soundMuted = readMuted();
+var muteKeyWasDown = false;
+
+//toggle on a fresh press of M, not every frame it's held
+function handleMuteToggle() {
+  var muteKeyIsDown = keyDown("m");
+  if (muteKeyIsDown && !muteKeyWasDown) {
+    soundMuted = !soundMuted;
+    saveMuted(soundMuted);
+  }
+  muteKeyWasDown = muteKeyIsDown;
+}
+
 function playTone(frequency, durationSeconds, type) {
+  if (soundMuted) {
+    return;
+  }
   var ctx = getAudioContext();
   if (!ctx) {
     return;
@@ -605,6 +641,11 @@ function draw() {
   rect(0, 178, GAME_WIDTH, GAME_HEIGHT - 178);
   fill(night ? 255 : 0);
   text("HI " + padScore(highScore) + "   " + padScore(score), 430, 50);
+
+  handleMuteToggle();
+  if (soundMuted) {
+    text("MUTED (M)", 10, 20);
+  }
 
   // p5.js 0.8.0 has no built-in deltaTime, so track it ourselves. dtFactor
   // is how many 60fps-reference-frames' worth of real time passed since the
