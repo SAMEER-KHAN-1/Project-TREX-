@@ -51,17 +51,30 @@ var FAST_FALL_ACCEL = 1.6;
 //this is used, in the PLAY branch of draw().
 var jumpKeyWasDown = false;
 
+// p5.play's keyDown() only reads true starting the SECOND frame a key has
+// been held - the frame it's first pressed is internally tagged
+// KEY_WENT_DOWN, not KEY_IS_DOWN yet, and keyDown() checks for the latter
+// specifically. draw() runs far faster than one frame per real 60fps tick
+// here, so an ordinary fast tap can start and end within that single first
+// frame - going was-up -> went-down -> went-up without keyDown() ever once
+// reading true, missing the press entirely. keyWentDown() catches exactly
+// that first frame, so OR the two together for any key that matters as
+// soon as it's pressed, not just once it's been held a moment.
+function keyHeld(key) {
+  return keyDown(key) || keyWentDown(key);
+}
+
 // Jump: space, up arrow, W, or a tap on the top half of the screen.
 // Duck/fast-fall: down arrow, S, or a touch held on the bottom half (ducks
 // like Chrome's dino while grounded, fast-falls while airborne) - keyboard
 // players get both for free from separate keys, so touch needs its own way
 // to reach duck instead of only ever being able to jump.
 function jumpPressed() {
-  return keyDown("space") || keyDown("up") || keyDown("w") || touchIsDown;
+  return keyHeld("space") || keyHeld("up") || keyHeld("w") || touchIsDown;
 }
 
 function duckPressed() {
-  return keyDown("down") || keyDown("s") || touchDuckIsDown;
+  return keyHeld("down") || keyHeld("s") || touchDuckIsDown;
 }
 
 // There is no separate duck sprite in this project's assets, so the crouch
@@ -397,7 +410,7 @@ var restartRequested = false;
 // including future changes to those, without listing them twice.
 var restartKeyWasDown = false;
 function restartKeyDown() {
-  return keyDown("enter") || jumpPressed();
+  return keyHeld("enter") || jumpPressed();
 }
 
 // p5.play maps pointer positions with canvas.offsetWidth (the CSS size)
@@ -578,7 +591,7 @@ var muteKeyWasDown = false;
 
 //toggle on a fresh press of M, not every frame it's held
 function handleMuteToggle() {
-  var muteKeyIsDown = keyDown("m");
+  var muteKeyIsDown = keyHeld("m");
   if (muteKeyIsDown && !muteKeyWasDown) {
     soundMuted = !soundMuted;
     saveMuted(soundMuted);
@@ -597,7 +610,7 @@ function handleMuteToggle() {
 var pauseKeyWasDown = false;
 
 function handlePauseToggle() {
-  var pauseKeyIsDown = keyDown("p");
+  var pauseKeyIsDown = keyHeld("p");
   if (pauseKeyIsDown && !pauseKeyWasDown) {
     if (gameState === PLAY) {
       gameState = PAUSED;
