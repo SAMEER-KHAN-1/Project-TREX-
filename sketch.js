@@ -692,19 +692,88 @@ function isNightMode() {
   return Math.floor(score / NIGHT_MODE_SCORE_INTERVAL) % 2 === 1;
 }
 
+// 0 = full day, 1 = full night. Eases toward whatever isNightMode() says over
+// DAY_NIGHT_TRANSITION_MS of real time instead of snapping, and only advances
+// while playing, so pausing or dying freezes a fade part-way through.
+var DAY_NIGHT_TRANSITION_MS = 3000;
+var nightAmount = 0;
+
+var DAY_SKY = [135, 206, 235];
+var NIGHT_SKY = [20, 24, 46];
+var DAY_SAND = [222, 184, 135];
+var NIGHT_SAND = [60, 56, 48];
+
+function blendRgb(dayRgb, nightRgb, t) {
+  return [
+    dayRgb[0] + (nightRgb[0] - dayRgb[0]) * t,
+    dayRgb[1] + (nightRgb[1] - dayRgb[1]) * t,
+    dayRgb[2] + (nightRgb[2] - dayRgb[2]) * t
+  ];
+}
+
+// Star positions are rolled once so they stay put instead of flickering to
+// new spots every frame. Math.random() rather than p5's random(): this runs
+// at load time, before p5 has installed its global functions.
+var STAR_COUNT = 45;
+var stars = (function() {
+  var list = [];
+  for (var i = 0; i < STAR_COUNT; i++) {
+    list.push({
+      x: Math.random() * GAME_WIDTH,
+      y: 6 + Math.random() * 150,
+      size: Math.random() < 0.25 ? 2 : 1
+    });
+  }
+  return list;
+})();
+
+function drawStars(alpha) {
+  if (alpha <= 0) {
+    return;
+  }
+  fill(255, 255, 255, alpha);
+  for (var i = 0; i < stars.length; i++) {
+    rect(stars[i].x, stars[i].y, stars[i].size, stars[i].size);
+  }
+}
+
 function draw() {
   //trex.debug = true;
-  var night = isNightMode();
-  if (night) {
-    background(20, 24, 46); // night sky
-    fill(60, 56, 48); // dark sand
-  } else {
-    background(135, 206, 235); // day sky
-    fill(222, 184, 135); // sandy ground
+
+  // p5.js 0.8.0 has no built-in deltaTime, so track it ourselves. dtFactor
+  // is how many 60fps-reference-frames' worth of real time passed since the
+  // last draw() call: 1 at exactly 60fps, ~4 at 240fps for a single frame,
+  // etc. Clamped so a tab going to sleep doesn't cause a huge jump on wake.
+  // Computed first because the day/night fade needs it before the sky is painted.
+  var now = millis();
+  var dt = now - lastFrameMillis;
+  lastFrameMillis = now;
+  var dtFactor = constrain(dt / (1000 / 60), 0, 3) * TIME_SCALE;
+
+  if (gameState === PLAY) {
+    var nightTarget = isNightMode() ? 1 : 0;
+    //same clamp as dtFactor, so waking a sleeping tab doesn't skip the fade
+    var fadeStep = constrain(dt, 0, 3 * 1000 / 60) / DAY_NIGHT_TRANSITION_MS;
+    if (nightAmount < nightTarget) {
+      nightAmount = Math.min(nightTarget, nightAmount + fadeStep);
+    } else if (nightAmount > nightTarget) {
+      nightAmount = Math.max(nightTarget, nightAmount - fadeStep);
+    }
   }
+
+  var sky = blendRgb(DAY_SKY, NIGHT_SKY, nightAmount);
+  background(sky[0], sky[1], sky[2]);
   noStroke();
+  //painted before drawSprites(), so clouds and the trex pass in front of them
+  drawStars(255 * nightAmount);
+  var sand = blendRgb(DAY_SAND, NIGHT_SAND, nightAmount);
+  fill(sand[0], sand[1], sand[2]);
   rect(0, 178, GAME_WIDTH, GAME_HEIGHT - 178);
-  fill(night ? 255 : 0);
+
+  // Text flips at the fade's midpoint instead of blending with it: a mid-grey
+  // score over the mid-fade sky would be close to unreadable for a second.
+  var textShade = nightAmount > 0.5 ? 255 : 0;
+  fill(textShade);
   text("HI " + padScore(highScore) + "   " + padScore(score), 430, 50);
 
   handleMuteToggle();
@@ -712,15 +781,6 @@ function draw() {
     text("MUTED (M)", 10, 20);
   }
   handlePauseToggle();
-
-  // p5.js 0.8.0 has no built-in deltaTime, so track it ourselves. dtFactor
-  // is how many 60fps-reference-frames' worth of real time passed since the
-  // last draw() call: 1 at exactly 60fps, ~4 at 240fps for a single frame,
-  // etc. Clamped so a tab going to sleep doesn't cause a huge jump on wake.
-  var now = millis();
-  var dt = now - lastFrameMillis;
-  lastFrameMillis = now;
-  var dtFactor = constrain(dt / (1000 / 60), 0, 3) * TIME_SCALE;
 
   if (gameState===PLAY){
     score = score + dtFactor;
@@ -835,7 +895,7 @@ function draw() {
     restartKeyWasDown = restartKeyIsDown;
   }
   else if (gameState === PAUSED) {
-    fill(night ? 255 : 0);
+    fill(textShade);
     text("PAUSED (P to resume)", GAME_WIDTH / 2 - 90, GAME_HEIGHT / 2);
   }
 
@@ -970,6 +1030,8 @@ function reset(){
   saveHighScore(highScore);
 
   score = 0;
+  //a new run starts in daylight straight away, not with a 3s fade out of night
+  nightAmount = 0;
   trexVY = 0;
   distanceTravelled = 0;
   lastObstacleSpawnDistance = 0;
