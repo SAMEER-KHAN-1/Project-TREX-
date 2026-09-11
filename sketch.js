@@ -297,6 +297,17 @@ function rollCloudGap() {
 if (!localStorage["HighestScore"]) {
   localStorage["HighestScore"] = 0;
 }
+//kept as a live number so it can update mid-run, not just read from
+//localStorage (a string) when the game ends
+var highScore = Number(localStorage["HighestScore"]) || 0;
+
+function padScore(n) {
+  var s = String(Math.floor(n));
+  while (s.length < 5) {
+    s = "0" + s;
+  }
+  return s;
+}
 
 function touchStarted() {
   touchIsDown = true;
@@ -457,7 +468,7 @@ function draw() {
   fill(222, 184, 135); // sandy ground
   rect(0, 178, GAME_WIDTH, GAME_HEIGHT - 178);
   fill(0);
-  text("Score: "+ Math.floor(score), 500,50);
+  text("HI " + padScore(highScore) + "   " + padScore(score), 430, 50);
 
   // p5.js 0.8.0 has no built-in deltaTime, so track it ourselves. dtFactor
   // is how many 60fps-reference-frames' worth of real time passed since the
@@ -470,6 +481,9 @@ function draw() {
 
   if (gameState===PLAY){
     score = score + dtFactor;
+    if (Math.floor(score) > highScore) {
+      highScore = Math.floor(score);
+    }
     ground.velocityX = -currentSpeed() * dtFactor;
     distanceTravelled = distanceTravelled + currentSpeed() * dtFactor;
 
@@ -648,9 +662,10 @@ function reset(){
 
   trex.changeAnimation("running",trex_running);
 
-  if(localStorage["HighestScore"] < Math.floor(score)){
-    localStorage["HighestScore"] = Math.floor(score);
-  }
+  //highScore is already kept live (updated the instant it's beaten, in
+  //draw()), so just persist it - no need to re-derive it from the score
+  //this run ended with, or compare against the stringified localStorage value
+  localStorage["HighestScore"] = highScore;
   console.log(localStorage["HighestScore"]);
 
   score = 0;
