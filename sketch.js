@@ -1,5 +1,6 @@
 var PLAY = 1;
 var END = 0;
+var PAUSED = 2;
 var gameState = PLAY;
 
 var trex, trex_running, trex_collided;
@@ -585,6 +586,32 @@ function handleMuteToggle() {
   muteKeyWasDown = muteKeyIsDown;
 }
 
+// "P" pauses/resumes - only meaningful while actually playing (or already
+// paused); pressing it on the game-over screen does nothing, same as other
+// gameplay keys there. Zeroing the sprites' velocities (not trexVY, our own
+// gravity accumulator) is what actually freezes them: drawSprites() applies
+// whatever velocity a sprite is still carrying every call regardless of
+// gameState, which is why the END branch below does the same thing - leaving
+// trexVY untouched instead lets a mid-jump pause resume its arc exactly
+// where it left off instead of snapping.
+var pauseKeyWasDown = false;
+
+function handlePauseToggle() {
+  var pauseKeyIsDown = keyDown("p");
+  if (pauseKeyIsDown && !pauseKeyWasDown) {
+    if (gameState === PLAY) {
+      gameState = PAUSED;
+      ground.velocityX = 0;
+      trex.velocityY = 0;
+      obstaclesGroup.setVelocityXEach(0);
+      cloudsGroup.setVelocityXEach(0);
+    } else if (gameState === PAUSED) {
+      gameState = PLAY;
+    }
+  }
+  pauseKeyWasDown = pauseKeyIsDown;
+}
+
 function playTone(frequency, durationSeconds, type) {
   if (soundMuted) {
     return;
@@ -663,6 +690,7 @@ function draw() {
   if (soundMuted) {
     text("MUTED (M)", 10, 20);
   }
+  handlePauseToggle();
 
   // p5.js 0.8.0 has no built-in deltaTime, so track it ourselves. dtFactor
   // is how many 60fps-reference-frames' worth of real time passed since the
@@ -777,6 +805,10 @@ function draw() {
       reset();
     }
     restartKeyWasDown = restartKeyIsDown;
+  }
+  else if (gameState === PAUSED) {
+    fill(night ? 255 : 0);
+    text("PAUSED (P to resume)", GAME_WIDTH / 2 - 90, GAME_HEIGHT / 2);
   }
 
 
