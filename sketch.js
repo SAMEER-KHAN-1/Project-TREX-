@@ -473,13 +473,28 @@ function setup() {
   nextCloudGap = rollCloudGap();
 }
 
+// Chrome's dino flips to a dark palette for a stretch every so many points,
+// then back to day, alternating for as long as you survive. Matches Chrome's
+// own 700-point interval.
+var NIGHT_MODE_SCORE_INTERVAL = 700;
+
+function isNightMode() {
+  return Math.floor(score / NIGHT_MODE_SCORE_INTERVAL) % 2 === 1;
+}
+
 function draw() {
   //trex.debug = true;
-  background(135, 206, 235); // sky blue
+  var night = isNightMode();
+  if (night) {
+    background(20, 24, 46); // night sky
+    fill(60, 56, 48); // dark sand
+  } else {
+    background(135, 206, 235); // day sky
+    fill(222, 184, 135); // sandy ground
+  }
   noStroke();
-  fill(222, 184, 135); // sandy ground
   rect(0, 178, GAME_WIDTH, GAME_HEIGHT - 178);
-  fill(0);
+  fill(night ? 255 : 0);
   text("HI " + padScore(highScore) + "   " + padScore(score), 430, 50);
 
   // p5.js 0.8.0 has no built-in deltaTime, so track it ourselves. dtFactor
