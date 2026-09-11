@@ -109,6 +109,158 @@ function currentSpeed() {
   return Math.min(BASE_SPEED + SPEED_PER_100_SCORE * Math.floor(score) / 100, MAX_SPEED);
 }
 
+// ---------------------------------------------------------------------------
+// Silhouette collision
+//
+// p5.play collides sprites as plain rectangles covering the whole image. Every
+// sprite here fills its image edge to edge, so there is no transparent margin
+// to trim - but the ARTWORK is not rectangular. A cactus is a trunk with arms,
+// so the corners above its arms are empty, the multi-cactus images have empty
+// gaps between plants, and the trex has empty space under its head and above
+// its tail. Those empty corners are what met each other, killing the player
+// when nothing visibly touched.
+//
+// Instead of one box, each image is reduced to a per-column solid span (the
+// topmost and bottommost non-transparent pixel in every column) and collision
+// compares those spans. That follows the real shape closely: passing over a
+// cactus arm, or through the gap between two plants, no longer registers.
+// ---------------------------------------------------------------------------
+
+//how many on-screen pixels the trex silhouette is shrunk by, so grazes forgive
+var HITBOX_FORGIVENESS = 2;
+
+var profileCache = {};
+var nextProfileId = 1;
+
+function imageProfile(img) {
+  if (img.__profileId === undefined) {
+    img.__profileId = nextProfileId++;
+  }
+  var cached = profileCache[img.__profileId];
+  if (cached) {
+    return cached;
+  }
+
+  var w = img.width;
+  var h = img.height;
+  img.loadPixels();
+  var px = img.pixels;
+  //p5 may store pixels at a higher density than the image's logical size
+  var density = Math.max(1, Math.round(Math.sqrt(px.length / (4 * w * h))));
+  var rowWidth = w * density;
+
+  var top = new Array(w);
+  var bottom = new Array(w);
+  for (var x = 0; x < w; x++) {
+    top[x] = -1;
+    bottom[x] = -1;
+    for (var y = 0; y < h; y++) {
+      var alpha = px[4 * (y * density * rowWidth + x * density) + 3];
+      if (alpha > 0) {
+        if (top[x] === -1) {
+          top[x] = y;
+        }
+        bottom[x] = y;
+      }
+    }
+  }
+
+  cached = { w: w, h: h, top: top, bottom: bottom };
+  profileCache[img.__profileId] = cached;
+  return cached;
+}
+
+// Where the sprite's image sits in world space, and how big one image pixel is
+// on screen.
+//
+// Deliberately NOT using sprite.width/height: spawnObstacles() calls addImage()
+// before setting scale, and p5.play only recomputes those cached dimensions
+// when an animation frame changes - which never happens for a single-image
+// sprite. So an obstacle reports its raw 50x100 size while being drawn at
+// 25x50. The sprite's own scale accessors are what p5.play uses to draw and to
+// size colliders, and they fold in the crouch stretch too, so a squashed trex
+// is handled automatically.
+function spriteSilhouette(sprite) {
+  if (!sprite.animation) {
+    return null;
+  }
+  var img = sprite.animation.getFrameImage();
+  if (!img || !img.width) {
+    return null;
+  }
+  var profile = imageProfile(img);
+  var scaleX = Math.abs(sprite._getScaleX());
+  var scaleY = Math.abs(sprite._getScaleY());
+  return {
+    profile: profile,
+    left: sprite.x - (profile.w * scaleX) / 2,
+    top: sprite.y - (profile.h * scaleY) / 2,
+    pixelWidth: scaleX,
+    pixelHeight: scaleY
+  };
+}
+
+function silhouettesTouch(a, b, shrinkB) {
+  var aRight = a.left + a.profile.w * a.pixelWidth;
+  var bRight = b.left + b.profile.w * b.pixelWidth;
+  if (aRight <= b.left || bRight <= a.left) {
+    return false;
+  }
+
+  for (var ax = 0; ax < a.profile.w; ax++) {
+    if (a.profile.top[ax] === -1) {
+      continue;
+    }
+    var columnLeft = a.left + ax * a.pixelWidth;
+    var columnRight = columnLeft + a.pixelWidth;
+    if (columnRight <= b.left || columnLeft >= bRight) {
+      continue;
+    }
+
+    var aTop = a.top + a.profile.top[ax] * a.pixelHeight;
+    var aBottom = a.top + (a.profile.bottom[ax] + 1) * a.pixelHeight;
+
+    var bxStart = Math.floor((columnLeft - b.left) / b.pixelWidth);
+    var bxEnd = Math.ceil((columnRight - b.left) / b.pixelWidth);
+    if (bxStart < 0) {
+      bxStart = 0;
+    }
+    if (bxEnd > b.profile.w) {
+      bxEnd = b.profile.w;
+    }
+
+    for (var bx = bxStart; bx < bxEnd; bx++) {
+      if (b.profile.top[bx] === -1) {
+        continue;
+      }
+      var bTop = b.top + b.profile.top[bx] * b.pixelHeight + shrinkB;
+      var bBottom = b.top + (b.profile.bottom[bx] + 1) * b.pixelHeight - shrinkB;
+      if (bTop < bBottom && aTop < bBottom && bTop < aBottom) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function trexHitsAnyObstacle() {
+  var trexShape = spriteSilhouette(trex);
+  if (!trexShape) {
+    return false;
+  }
+  //forgive a couple of pixels horizontally as well as vertically
+  trexShape.left += HITBOX_FORGIVENESS;
+  trexShape.pixelWidth -= (2 * HITBOX_FORGIVENESS) / trexShape.profile.w;
+
+  for (var i = 0; i < obstaclesGroup.length; i++) {
+    var obstacleShape = spriteSilhouette(obstaclesGroup[i]);
+    if (obstacleShape && silhouettesTouch(obstacleShape, trexShape, HITBOX_FORGIVENESS)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Obstacles and clouds are spaced by distance travelled, not by a timer, so
 // the gaps between them stay the same no matter how slow or fast the game runs.
 // The gap is re-rolled after every spawn instead of being a fixed number,
@@ -368,7 +520,7 @@ function draw() {
     spawnClouds();
     spawnObstacles();
 
-    if(obstaclesGroup.isTouching(trex)){
+    if(trexHitsAnyObstacle()){
         gameState = END;
         setCrouching(false);
     }
