@@ -46,6 +46,10 @@ var GRAVITY = 0.8;
 // Extra downward pull for the fast-fall keys, used while airborne.
 var FAST_FALL_ACCEL = 1.6;
 
+//tracked so a jump only fires on a fresh key press - see the comment where
+//this is used, in the PLAY branch of draw().
+var jumpKeyWasDown = false;
+
 // Jump: space, up arrow, W, or a tap on the top half of the screen.
 // Duck/fast-fall: down arrow, S, or a touch held on the bottom half (ducks
 // like Chrome's dino while grounded, fast-falls while airborne) - keyboard
@@ -684,12 +688,20 @@ function draw() {
     var airborne = trex.y < 159;
     var jumpedThisFrame = false;
 
+    // Edge-triggered on a fresh press, not level-triggered on the key being
+    // held: trex.y takes several frames to actually cross the airborne
+    // threshold after a jump starts, so while still !airborne on those
+    // frames, a held key (or held touch) used to re-enter this branch and
+    // re-fire the jump - and its sound - repeatedly for a single press,
+    // worse the faster the frame rate.
+    var jumpKeyIsDown = jumpPressed();
     //jump takes priority over duck: a held duck key must not cancel a jump
-    if(jumpPressed() && !airborne && !isCrouching) {
+    if(jumpKeyIsDown && !jumpKeyWasDown && !airborne && !isCrouching) {
       trexVY = JUMP_VELOCITY;
       jumpedThisFrame = true;
       playJumpSound();
     }
+    jumpKeyWasDown = jumpKeyIsDown;
 
     //fast-fall only makes sense while off the ground
     if(duckPressed() && airborne) {
