@@ -335,6 +335,14 @@ function touchEnded() {
 // Set by the canvas pointer handler below and consumed in draw().
 var restartRequested = false;
 
+// Restarting after Game Over: any of the jump keys (Space/Up/W/tap), or
+// Enter. Reusing jumpPressed() means restart keys match jump keys exactly,
+// including future changes to those, without listing them twice.
+var restartKeyWasDown = false;
+function restartKeyDown() {
+  return keyDown("enter") || jumpPressed();
+}
+
 // p5.play maps pointer positions with canvas.offsetWidth (the CSS size)
 // instead of canvas.width (the drawing buffer), so mouseX/mouseY come back
 // in screen pixels once the canvas is scaled to fill the window - which
@@ -537,6 +545,13 @@ function draw() {
     if(trexHitsAnyObstacle()){
         gameState = END;
         setCrouching(false);
+        // Seed the "was this key already down" baseline with whatever the
+        // player happens to be holding at the moment of death (very often
+        // the jump key, since that's what you'd be pressing mid-obstacle).
+        // Without this, dying while holding it would read as a fresh press
+        // on the very next frame and instantly restart, skipping the Game
+        // Over screen entirely.
+        restartKeyWasDown = restartKeyDown();
     }
   }
   else if (gameState === END) {
@@ -553,9 +568,15 @@ function draw() {
     //change the trex animation
     trex.changeAnimation("collided",trex_collided);
 
-    if(restartRequested || keyDown("enter")) {
+    // Restart on a fresh key PRESS, not while the key is simply held down -
+    // keyDown() is level-triggered (true for every frame it's held), so
+    // holding Enter/Space/etc. across a death would otherwise re-fire
+    // reset() every single frame, forever.
+    var restartKeyIsDown = restartKeyDown();
+    if (restartRequested || (restartKeyIsDown && !restartKeyWasDown)) {
       reset();
     }
+    restartKeyWasDown = restartKeyIsDown;
   }
 
 
