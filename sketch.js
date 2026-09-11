@@ -621,6 +621,11 @@ function spawnClouds() {
     cloud.scale = random(0.35, 0.6);
     cloud.baseVelocityX = -CLOUD_SPEED * random(0.65, 1.25);
 
+    //same fix as obstacles: push out by half-width so a big cloud doesn't
+    //pop in already partway onto the screen
+    var cloudWidth = cloud.animation.getFrameImage().width * Math.abs(cloud._getScaleX());
+    cloud.x = GAME_WIDTH + cloudWidth / 2;
+
     //removed once off-screen by updateClouds() instead of by lifetime
     cloud.lifetime = -1;
 
@@ -673,6 +678,13 @@ function spawnObstacles() {
     // the same ground surface, matching where the trex's own feet rest.
     var drawnHeight = obstacle.animation.getFrameImage().height * Math.abs(obstacle._getScaleY());
     obstacle.y = GROUND_SURFACE_Y - drawnHeight / 2;
+
+    // Sprite x is its CENTER, so spawning every obstacle at a fixed x=600
+    // (the canvas width) put up to half its width already inside the visible
+    // area - the widest cactus cluster popped in 37.5px onto the screen
+    // instead of sliding in from off-screen. Push it out by its own half-width.
+    var drawnWidth = obstacle.animation.getFrameImage().width * Math.abs(obstacle._getScaleX());
+    obstacle.x = GAME_WIDTH + drawnWidth / 2;
 
     //add each obstacle to the group
     obstaclesGroup.add(obstacle);
