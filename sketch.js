@@ -339,6 +339,15 @@ function touchEnded() {
   touchIsDown = false;
 }
 
+// p5 wires touchstart/touchend to touchStarted()/touchEnded() above, but has
+// no hook for touchcancel - fired when a system gesture, incoming call, or a
+// second finger interrupts an in-progress touch. Without this, touchIsDown
+// would stay stuck true forever after a cancelled touch, and since
+// jumpPressed() (and restartKeyDown() on the game-over screen) read it, the
+// trex would keep jumping/restarting every single frame until the page is
+// reloaded.
+document.addEventListener("touchcancel", touchEnded);
+
 // p5.play calls p5's _updateTouchCoords() with no argument, but p5 0.8.0
 // requires the event object and reads e.touches from it. The resulting
 // TypeError was thrown inside every mousedown and touchstart handler,
