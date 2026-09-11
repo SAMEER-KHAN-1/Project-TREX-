@@ -298,12 +298,30 @@ function rollCloudGap() {
   return random(CLOUD_GAP_MIN_PX, CLOUD_GAP_MAX_PX);
 }
 
-if (!localStorage["HighestScore"]) {
-  localStorage["HighestScore"] = 0;
+// localStorage access throws (not just "fails") in some contexts - private
+// browsing, blocked third-party cookies, sandboxed iframes - and this runs
+// at the top level outside setup(), so an uncaught throw here would abort
+// the whole script before the canvas ever appears. Fall back to an
+// in-memory high score (just doesn't persist across reloads) instead.
+function readHighScore() {
+  try {
+    return Number(localStorage["HighestScore"]) || 0;
+  } catch (e) {
+    return 0;
+  }
 }
+
+function saveHighScore(value) {
+  try {
+    localStorage["HighestScore"] = value;
+  } catch (e) {
+    //storage unavailable - high score just won't survive a reload
+  }
+}
+
 //kept as a live number so it can update mid-run, not just read from
 //localStorage (a string) when the game ends
-var highScore = Number(localStorage["HighestScore"]) || 0;
+var highScore = readHighScore();
 
 function padScore(n) {
   var s = String(Math.floor(n));
@@ -726,8 +744,7 @@ function reset(){
   //highScore is already kept live (updated the instant it's beaten, in
   //draw()), so just persist it - no need to re-derive it from the score
   //this run ended with, or compare against the stringified localStorage value
-  localStorage["HighestScore"] = highScore;
-  console.log(localStorage["HighestScore"]);
+  saveHighScore(highScore);
 
   score = 0;
   trexVY = 0;
