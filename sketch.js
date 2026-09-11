@@ -353,11 +353,15 @@ function padScore(n) {
   return s;
 }
 
-// Bottom half of the touch target counts as duck/fast-fall; everything else
-// is a jump, same as tapping anywhere used to do.
+// Bottom half of the screen counts as duck/fast-fall; everything else is a
+// jump, same as tapping anywhere used to do.
 function isDuckTouchPoint(clientX, clientY) {
-  var point = canvasPointerToGame({ clientX: clientX, clientY: clientY });
-  return !!point && point.y > GAME_HEIGHT / 2;
+  var canvasElt = document.querySelector("canvas");
+  if (!canvasElt) {
+    return false;
+  }
+  var rect = canvasElt.getBoundingClientRect();
+  return rect.height > 0 && (clientY - rect.top) / rect.height > 0.5;
 }
 
 function touchStarted(e) {
@@ -426,9 +430,11 @@ function canvasPointerToGame(evt) {
   if (!rect.width || !rect.height) {
     return null;
   }
+  //width/height are the (possibly taller than 200) canvas; viewOffsetY is
+  //where the gameplay strip sits inside it - see fillScreen()
   return {
-    x: (evt.clientX - rect.left) * (GAME_WIDTH / rect.width),
-    y: (evt.clientY - rect.top) * (GAME_HEIGHT / rect.height)
+    x: (evt.clientX - rect.left) * (width / rect.width),
+    y: (evt.clientY - rect.top) * (height / rect.height) - viewOffsetY
   };
 }
 
@@ -453,18 +459,109 @@ function onCanvasPointerDown(evt) {
 var GAME_WIDTH = 600;
 var GAME_HEIGHT = 200;
 
+// Gameplay happens in a fixed 600x200 strip, but real screens are nowhere
+// near 3:1, so scaling just that strip to fit left big blank bars above and
+// below it. Instead the canvas is made as tall as the screen's shape needs -
+// still 600 wide, so every spawn/collision/physics number is untouched - and
+// the extra height becomes more sky above and more sand below. viewOffsetY is
+// where the 600x200 strip sits inside that taller canvas.
+var SKY_SHARE_OF_EXTRA_HEIGHT = 0.6;
+var viewOffsetY = 0;
+
 function fillScreen() {
-  var scaleFactor = Math.min(windowWidth / GAME_WIDTH, windowHeight / GAME_HEIGHT);
+  var viewHeight = Math.max(GAME_HEIGHT, Math.round(GAME_WIDTH * windowHeight / windowWidth));
+  if (width !== GAME_WIDTH || height !== viewHeight) {
+    //noRedraw: this also runs from setup(), before the sprites draw() needs exist
+    resizeCanvas(GAME_WIDTH, viewHeight, true);
+  }
+  viewOffsetY = Math.round((height - GAME_HEIGHT) * SKY_SHARE_OF_EXTRA_HEIGHT);
+
+  //only a window wider than 3:1 still gets bars (at the sides)
+  var scaleFactor = Math.min(windowWidth / width, windowHeight / height);
+  var cssWidth = width * scaleFactor;
+  var cssHeight = height * scaleFactor;
+  //rounding viewHeight can leave the fit a pixel or two short; stretch that
+  //sliver rather than show a hairline of page background along one edge
+  if (Math.abs(cssWidth - windowWidth) <= scaleFactor + 1) {
+    cssWidth = windowWidth;
+  }
+  if (Math.abs(cssHeight - windowHeight) <= scaleFactor + 1) {
+    cssHeight = windowHeight;
+  }
   var canvasElt = document.querySelector("canvas");
   if (canvasElt) {
-    canvasElt.style.width = (GAME_WIDTH * scaleFactor) + "px";
-    canvasElt.style.height = (GAME_HEIGHT * scaleFactor) + "px";
+    canvasElt.style.width = cssWidth + "px";
+    canvasElt.style.height = cssHeight + "px";
   }
 }
 
 function windowResized() {
   fillScreen();
 }
+
+// Browsers only allow real fullscreen (hiding tabs and the address bar) to
+// start from inside a genuine input event - never on page load - so it's
+// requested on the player's first key press or tap. After that F toggles it,
+// and Esc leaves it as on any page. Entering/leaving fires a window resize,
+// which windowResized() above already handles.
+function isFullscreen() {
+  return !!(document.fullscreenElement || document.webkitFullscreenElement);
+}
+
+function enterFullscreen() {
+  var el = document.documentElement;
+  var request = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!request || isFullscreen()) {
+    return;
+  }
+  var result = request.call(el);
+  //refused (e.g. inside an iframe without permission) - just stay windowed
+  if (result && result.catch) {
+    result.catch(function() {});
+  }
+}
+
+function exitFullscreen() {
+  var exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!exit || !isFullscreen()) {
+    return;
+  }
+  var result = exit.call(document);
+  if (result && result.catch) {
+    result.catch(function() {});
+  }
+}
+
+var fullscreenAutoTried = false;
+
+function tryAutoFullscreen() {
+  if (fullscreenAutoTried) {
+    return;
+  }
+  fullscreenAutoTried = true;
+  enterFullscreen();
+}
+
+function onKeyDownForFullscreen(e) {
+  if (e.key === "f" || e.key === "F") {
+    if (!e.repeat) {
+      fullscreenAutoTried = true;
+      if (isFullscreen()) {
+        exitFullscreen();
+      } else {
+        enterFullscreen();
+      }
+    }
+    return;
+  }
+  //Esc is how you get out of fullscreen, so it must never be what enters it
+  if (e.key !== "Escape") {
+    tryAutoFullscreen();
+  }
+}
+
+document.addEventListener("keydown", onKeyDownForFullscreen);
+document.addEventListener("pointerdown", tryAutoFullscreen);
 
 function preload(){
   trex_running =   loadAnimation("trex1.png","trex3.png","trex4.png");
@@ -713,19 +810,31 @@ function blendRgb(dayRgb, nightRgb, t) {
 
 // Star positions are rolled once so they stay put instead of flickering to
 // new spots every frame. Math.random() rather than p5's random(): this runs
-// at load time, before p5 has installed its global functions.
-var STAR_COUNT = 45;
+// at load time, before p5 has installed its global functions. Stored as 0-1
+// fractions because how much sky there is depends on the screen's shape.
+var STAR_COUNT = 70;
 var stars = (function() {
   var list = [];
   for (var i = 0; i < STAR_COUNT; i++) {
     list.push({
-      x: Math.random() * GAME_WIDTH,
-      y: 6 + Math.random() * 150,
+      x: Math.random(),
+      y: Math.random(),
       size: Math.random() < 0.25 ? 2 : 1
     });
   }
   return list;
 })();
+
+//where a star lands on the canvas: anywhere in the visible sky, from the top
+//of the screen down to just above the ground line
+function starCanvasPosition(star) {
+  var skyTop = 4;
+  var skyBottom = viewOffsetY + 165;
+  return {
+    x: Math.floor(star.x * GAME_WIDTH),
+    y: Math.floor(skyTop + star.y * (skyBottom - skyTop))
+  };
+}
 
 function drawStars(alpha) {
   if (alpha <= 0) {
@@ -733,7 +842,8 @@ function drawStars(alpha) {
   }
   fill(255, 255, 255, alpha);
   for (var i = 0; i < stars.length; i++) {
-    rect(stars[i].x, stars[i].y, stars[i].size, stars[i].size);
+    var pos = starCanvasPosition(stars[i]);
+    rect(pos.x, pos.y, stars[i].size, stars[i].size);
   }
 }
 
@@ -768,7 +878,13 @@ function draw() {
   drawStars(255 * nightAmount);
   var sand = blendRgb(DAY_SAND, NIGHT_SAND, nightAmount);
   fill(sand[0], sand[1], sand[2]);
-  rect(0, 178, GAME_WIDTH, GAME_HEIGHT - 178);
+  //from the ground line all the way to the bottom of the screen
+  rect(0, viewOffsetY + 178, width, height - (viewOffsetY + 178));
+
+  // Everything from here down to drawSprites() is drawn in gameplay-strip
+  // coordinates (0-600 x 0-200), shifted to wherever the strip sits on screen.
+  push();
+  translate(0, viewOffsetY);
 
   // Text flips at the fade's midpoint instead of blending with it: a mid-grey
   // score over the mid-fade sky would be close to unreadable for a second.
@@ -901,6 +1017,7 @@ function draw() {
 
 
   drawSprites();
+  pop();
 }
 
 // Sprites are removed once they leave the screen rather than after a fixed
