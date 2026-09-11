@@ -13,6 +13,7 @@ var score = 0;
 var gameOver, restart;
 
 var touchIsDown = false;
+var touchDuckIsDown = false;
 
 // Physics/spawning below is expressed in "units per 60fps reference frame"
 // and rescaled every draw() call by dtFactor so gameplay speed, jump height
@@ -45,14 +46,17 @@ var GRAVITY = 0.8;
 // Extra downward pull for the fast-fall keys, used while airborne.
 var FAST_FALL_ACCEL = 1.6;
 
-// Jump: space, up arrow, W, or a screen tap. Duck/fast-fall: down arrow or S
-// (ducks like Chrome's dino while grounded, fast-falls while airborne).
+// Jump: space, up arrow, W, or a tap on the top half of the screen.
+// Duck/fast-fall: down arrow, S, or a touch held on the bottom half (ducks
+// like Chrome's dino while grounded, fast-falls while airborne) - keyboard
+// players get both for free from separate keys, so touch needs its own way
+// to reach duck instead of only ever being able to jump.
 function jumpPressed() {
   return keyDown("space") || keyDown("up") || keyDown("w") || touchIsDown;
 }
 
 function duckPressed() {
-  return keyDown("down") || keyDown("s");
+  return keyDown("down") || keyDown("s") || touchDuckIsDown;
 }
 
 // There is no separate duck sprite in this project's assets, so the crouch
@@ -331,12 +335,25 @@ function padScore(n) {
   return s;
 }
 
-function touchStarted() {
-  touchIsDown = true;
+// Bottom half of the touch target counts as duck/fast-fall; everything else
+// is a jump, same as tapping anywhere used to do.
+function isDuckTouchPoint(clientX, clientY) {
+  var point = canvasPointerToGame({ clientX: clientX, clientY: clientY });
+  return !!point && point.y > GAME_HEIGHT / 2;
+}
+
+function touchStarted(e) {
+  var touch = e && e.touches && e.touches[0];
+  if (touch && isDuckTouchPoint(touch.clientX, touch.clientY)) {
+    touchDuckIsDown = true;
+  } else {
+    touchIsDown = true;
+  }
 }
 
 function touchEnded() {
   touchIsDown = false;
+  touchDuckIsDown = false;
 }
 
 // p5 wires touchstart/touchend to touchStarted()/touchEnded() above, but has
