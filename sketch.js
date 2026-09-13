@@ -782,6 +782,13 @@ function playDeathSound() {
   playTone(160, 0.35, "sawtooth");
 }
 
+//two harsh, quick blips read as a "caw" - distinct from the jump/score/death
+//tones so a crow entering the screen is heard, not just seen
+function playCrowSound() {
+  playTone(300, 0.05, "sawtooth");
+  playTone(220, 0.07, "sawtooth", 0.06);
+}
+
 // Chrome's dino flips to a dark palette for a stretch every so many points,
 // then back to day, alternating for as long as you survive. Matches Chrome's
 // own 700-point interval.
@@ -1188,6 +1195,7 @@ function spawnObstacles() {
               break;
       case 7: obstacle.addAnimation("flying", crowFrame1, crowFrame2);
               obstacle.animation.frameDelay = 8;
+              playCrowSound();
               break;
       default: break;
     }
