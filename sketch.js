@@ -783,6 +783,47 @@ function playDeathSound() {
   playTone(160, 0.35, "sawtooth");
 }
 
+// ---------------------------------------------------------------------------
+// Death impact feedback: a brief screen shake and red flash, for a bit of
+// arcade-style punch on collision instead of the game just silently freezing.
+// ---------------------------------------------------------------------------
+var DEATH_SHAKE_DURATION_MS = 250;
+var DEATH_SHAKE_MAX_PX = 6;
+var DEATH_FLASH_DURATION_MS = 200;
+//negative = no death has happened yet (or a new run has started) since this run
+var deathEffectStartMillis = -1;
+
+function deathEffectElapsedMs() {
+  if (deathEffectStartMillis < 0) {
+    return Infinity;
+  }
+  return millis() - deathEffectStartMillis;
+}
+
+//decays to (0,0) once DEATH_SHAKE_DURATION_MS has passed, so the shake settles
+//instead of jittering the game-over screen forever
+function currentShakeOffset() {
+  var elapsed = deathEffectElapsedMs();
+  if (elapsed >= DEATH_SHAKE_DURATION_MS) {
+    return { x: 0, y: 0 };
+  }
+  var magnitude = DEATH_SHAKE_MAX_PX * (1 - elapsed / DEATH_SHAKE_DURATION_MS);
+  return { x: random(-magnitude, magnitude), y: random(-magnitude, magnitude) };
+}
+
+//drawn in full-canvas space (after the gameplay strip's own push/pop), so the
+//flash covers the whole screen regardless of where the strip sits inside it
+function drawDeathFlash() {
+  var elapsed = deathEffectElapsedMs();
+  if (elapsed >= DEATH_FLASH_DURATION_MS) {
+    return;
+  }
+  var alpha = 120 * (1 - elapsed / DEATH_FLASH_DURATION_MS);
+  noStroke();
+  fill(200, 30, 30, alpha);
+  rect(0, 0, width, height);
+}
+
 //two harsh, quick blips read as a "caw" - distinct from the jump/score/death
 //tones so a crow entering the screen is heard, not just seen
 function playCrowSound() {
@@ -987,7 +1028,8 @@ function draw() {
   // Everything from here down to drawSprites() is drawn in gameplay-strip
   // coordinates (0-600 x 0-200), shifted to wherever the strip sits on screen.
   push();
-  translate(0, viewOffsetY);
+  var shake = currentShakeOffset();
+  translate(shake.x, viewOffsetY + shake.y);
 
   fill(textShade);
 
@@ -1076,6 +1118,7 @@ function draw() {
         gameState = END;
         setCrouching(false);
         playDeathSound();
+        deathEffectStartMillis = millis();
         // Seed the "was this key already down" baseline with whatever the
         // player happens to be holding at the moment of death (very often
         // the jump key, since that's what you'd be pressing mid-obstacle).
@@ -1117,6 +1160,8 @@ function draw() {
 
   drawSprites();
   pop();
+
+  drawDeathFlash();
 }
 
 // Sprites are removed once they leave the screen rather than after a fixed
@@ -1356,6 +1401,7 @@ function reset(){
   gameOver.visible = false;
   restart.visible = false;
   setCrouching(false);
+  deathEffectStartMillis = -1;
 
   // jumpKeyWasDown is only ever updated inside the PLAY branch of draw(), so
   // it stays frozen at whatever it was on the last PLAY frame before death.
