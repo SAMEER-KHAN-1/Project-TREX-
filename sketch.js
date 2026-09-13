@@ -1,7 +1,9 @@
 var PLAY = 1;
 var END = 0;
 var PAUSED = 2;
-var gameState = PLAY;
+var MENU = 3;
+var MULTIPLAYER_MENU = 4;
+var gameState = MENU;
 
 var trex, trex_running, trex_collided;
 var ground, invisibleGround, groundImage;
@@ -449,11 +451,87 @@ function isOverRestart(x, y) {
          Math.abs(y - restart.y) <= halfHeight;
 }
 
+// ---------------------------------------------------------------------------
+// Main menu - single player vs multiplayer
+//
+// Buttons are stored as {x, y, w, h} centered rectangles (matching how
+// sprite x/y already work in this file) so the same hit-test works for
+// pointer clicks/taps regardless of which screen is showing them.
+// ---------------------------------------------------------------------------
+var MENU_SINGLE_PLAYER_BUTTON = { x: 300, y: 110, w: 240, h: 32 };
+var MENU_MULTIPLAYER_BUTTON = { x: 300, y: 152, w: 240, h: 32 };
+var MENU_BACK_BUTTON = { x: 300, y: 152, w: 160, h: 32 };
+
+function isOverButton(button, x, y) {
+  return Math.abs(x - button.x) <= button.w / 2 &&
+         Math.abs(y - button.y) <= button.h / 2;
+}
+
+//consumed in draw() rather than acted on immediately, same reasoning as
+//restartRequested: pointer events fire outside p5's draw loop
+var menuSinglePlayerRequested = false;
+var menuMultiplayerRequested = false;
+var menuBackRequested = false;
+
 function onCanvasPointerDown(evt) {
   var point = canvasPointerToGame(evt);
-  if (point && isOverRestart(point.x, point.y)) {
-    restartRequested = true;
+  if (!point) {
+    return;
   }
+  if (isOverRestart(point.x, point.y)) {
+    restartRequested = true;
+  } else if (gameState === MENU) {
+    if (isOverButton(MENU_SINGLE_PLAYER_BUTTON, point.x, point.y)) {
+      menuSinglePlayerRequested = true;
+    } else if (isOverButton(MENU_MULTIPLAYER_BUTTON, point.x, point.y)) {
+      menuMultiplayerRequested = true;
+    }
+  } else if (gameState === MULTIPLAYER_MENU) {
+    if (isOverButton(MENU_BACK_BUTTON, point.x, point.y)) {
+      menuBackRequested = true;
+    }
+  }
+}
+
+function drawButton(button, label) {
+  push();
+  rectMode(CENTER);
+  noStroke();
+  fill(50, 90, 170);
+  rect(button.x, button.y, button.w, button.h, 4);
+  fill(255);
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+  textSize(10);
+  text(label, button.x, button.y + 1);
+  pop();
+}
+
+function drawMenuScreen(textShade) {
+  push();
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+  fill(textShade);
+  textSize(20);
+  text("T-REX RUNNER", GAME_WIDTH / 2, 60);
+  pop();
+
+  drawButton(MENU_SINGLE_PLAYER_BUTTON, "SINGLE PLAYER");
+  drawButton(MENU_MULTIPLAYER_BUTTON, "MULTIPLAYER");
+}
+
+function drawMultiplayerStubScreen(textShade) {
+  push();
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+  fill(textShade);
+  textSize(14);
+  text("MULTIPLAYER", GAME_WIDTH / 2, 60);
+  textSize(9);
+  text("Coming soon...", GAME_WIDTH / 2, 95);
+  pop();
+
+  drawButton(MENU_BACK_BUTTON, "BACK");
 }
 
 var GAME_WIDTH = 600;
@@ -608,7 +686,13 @@ function setup() {
   ground = createSprite(200,180,400,20);
   ground.addImage("ground",groundImage);
   ground.x = ground.width /2;
-  ground.velocityX = -BASE_SPEED;
+  // Not set moving here: the game now starts on the MENU screen rather than
+  // PLAY, and the wrap-around check that keeps the ground looping only runs
+  // inside the PLAY branch of draw() - a non-zero velocity here would have
+  // scrolled it off to the left forever before a game even started. PLAY
+  // sets its own velocity from currentSpeed() every frame once gameplay
+  // actually begins.
+  ground.velocityX = 0;
 
   gameOver = createSprite(300,100);
   gameOver.addImage(gameOverImg);
@@ -1155,6 +1239,23 @@ function draw() {
   else if (gameState === PAUSED) {
     fill(textShade);
     text("PAUSED (P to resume)", GAME_WIDTH / 2 - 90, GAME_HEIGHT / 2);
+  }
+  else if (gameState === MENU) {
+    drawMenuScreen(textShade);
+    if (menuSinglePlayerRequested || keyWentDown("1")) {
+      menuSinglePlayerRequested = false;
+      reset();
+    } else if (menuMultiplayerRequested || keyWentDown("2")) {
+      menuMultiplayerRequested = false;
+      gameState = MULTIPLAYER_MENU;
+    }
+  }
+  else if (gameState === MULTIPLAYER_MENU) {
+    drawMultiplayerStubScreen(textShade);
+    if (menuBackRequested || keyWentDown("esc")) {
+      menuBackRequested = false;
+      gameState = MENU;
+    }
   }
 
 
