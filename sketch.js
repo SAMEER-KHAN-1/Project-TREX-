@@ -581,6 +581,8 @@ var MULTIPLAYER_CREATE_BUTTON = { x: 300, y: 95, w: 240, h: 32 };
 var MULTIPLAYER_JOIN_BUTTON = { x: 300, y: 135, w: 240, h: 32 };
 var MULTIPLAYER_LEAVE_BUTTON = { x: 300, y: 172, w: 160, h: 28 };
 var MULTIPLAYER_JOIN_SUBMIT_BUTTON = { x: 300, y: 140, w: 160, h: 30 };
+//below the restart icon (centered at 300,140, ~32px tall) on the game-over screen
+var END_MENU_BUTTON = { x: 300, y: 180, w: 110, h: 24 };
 
 function isOverButton(button, x, y) {
   return Math.abs(x - button.x) <= button.w / 2 &&
@@ -596,6 +598,7 @@ var multiplayerCreateRequested = false;
 var multiplayerJoinRequested = false;
 var multiplayerJoinSubmitRequested = false;
 var multiplayerLeaveRequested = false;
+var endMenuRequested = false;
 
 function onCanvasPointerDown(evt) {
   var point = canvasPointerToGame(evt);
@@ -604,6 +607,10 @@ function onCanvasPointerDown(evt) {
   }
   if (isOverRestart(point.x, point.y)) {
     restartRequested = true;
+  } else if (gameState === END) {
+    if (isOverButton(END_MENU_BUTTON, point.x, point.y)) {
+      endMenuRequested = true;
+    }
   } else if (gameState === MENU) {
     if (isOverButton(MENU_SINGLE_PLAYER_BUTTON, point.x, point.y)) {
       menuSinglePlayerRequested = true;
@@ -1518,6 +1525,15 @@ function draw() {
       reset();
     }
     restartKeyWasDown = restartKeyIsDown;
+
+    //otherwise picking Single Player was a one-way trip - there was no way
+    //back to the mode-select menu (to reach Multiplayer, say) once a run
+    //had ended, short of reloading the page
+    drawButton(END_MENU_BUTTON, "MENU");
+    if (endMenuRequested || keyWentDown("esc")) {
+      endMenuRequested = false;
+      returnToMenu();
+    }
   }
   else if (gameState === PAUSED) {
     fill(textShade);
@@ -1812,8 +1828,11 @@ function spawnObstacles() {
   }
 }
 
-function reset(){
-  gameState = PLAY;
+// Shared by reset() (back into a fresh single-player run) and returnToMenu()
+// (back to the mode-select screen) - both need to wipe a finished run's
+// state the same way, they just end up in a different gameState.
+function resetGame(targetState) {
+  gameState = targetState;
   restartRequested = false;
   gameOver.visible = false;
   restart.visible = false;
@@ -1852,4 +1871,12 @@ function reset(){
   nextObstacleGap = rollObstacleGap();
   nextCloudGap = rollCloudGap();
   nextScoreMilestone = SCORE_MILESTONE_INTERVAL;
+}
+
+function reset() {
+  resetGame(PLAY);
+}
+
+function returnToMenu() {
+  resetGame(MENU);
 }
