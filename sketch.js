@@ -822,7 +822,10 @@ var stars = (function() {
     list.push({
       x: Math.random(),
       y: Math.random(),
-      size: Math.random() < 0.25 ? 2 : 1
+      size: Math.random() < 0.25 ? 2 : 1,
+      //each star twinkles on its own cycle so the whole sky doesn't pulse in unison
+      twinklePhase: Math.random() * Math.PI * 2,
+      twinkleSpeed: 0.4 + Math.random() * 0.6
     });
   }
   return list;
@@ -839,14 +842,34 @@ function starCanvasPosition(star) {
   };
 }
 
+// Fraction of screen width a star drifts left per 60fps reference frame - a
+// full pass across the sky takes a couple of minutes, subtle enough to read
+// as "the sky is alive" without looking like the stars are racing the ground.
+var STAR_DRIFT_SPEED = 0.0003;
+
+function updateStars(dtFactor) {
+  for (var i = 0; i < stars.length; i++) {
+    var star = stars[i];
+    star.x -= STAR_DRIFT_SPEED * dtFactor;
+    if (star.x < 0) {
+      star.x += 1;
+    }
+  }
+}
+
 function drawStars(alpha) {
   if (alpha <= 0) {
     return;
   }
-  fill(255, 255, 255, alpha);
+  var nowSeconds = millis() / 1000;
   for (var i = 0; i < stars.length; i++) {
-    var pos = starCanvasPosition(stars[i]);
-    rect(pos.x, pos.y, stars[i].size, stars[i].size);
+    var star = stars[i];
+    //brightness oscillates between 55% and 100% of the base alpha, per-star
+    //phase/speed so the sky twinkles instead of the whole thing pulsing together
+    var twinkle = 0.775 + 0.225 * Math.sin(nowSeconds * star.twinkleSpeed + star.twinklePhase);
+    fill(255, 255, 255, alpha * twinkle);
+    var pos = starCanvasPosition(star);
+    rect(pos.x, pos.y, star.size, star.size);
   }
 }
 
@@ -872,6 +895,7 @@ function draw() {
     } else if (nightAmount > nightTarget) {
       nightAmount = Math.max(nightTarget, nightAmount - fadeStep);
     }
+    updateStars(dtFactor);
   }
 
   var sky = blendRgb(DAY_SKY, NIGHT_SKY, nightAmount);
@@ -1156,6 +1180,15 @@ function reset(){
   gameOver.visible = false;
   restart.visible = false;
   setCrouching(false);
+
+  // jumpKeyWasDown is only ever updated inside the PLAY branch of draw(), so
+  // it stays frozen at whatever it was on the last PLAY frame before death.
+  // Restarting is most often done with the same keys that jump (Space/Up/W),
+  // so on the very next PLAY frame that held key looked like a brand-new
+  // press - jumpKeyWasDown was still false - and fired an unwanted jump the
+  // instant the trex respawned. Seed it with whatever's currently held, same
+  // fix as restartKeyWasDown gets on death below.
+  jumpKeyWasDown = jumpPressed();
 
   // destroyEach() calls a "destroy" method that does not exist on Sprite in
   // this version of p5.play, so it threw and aborted the whole restart.
