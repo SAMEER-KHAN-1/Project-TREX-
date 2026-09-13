@@ -1166,6 +1166,9 @@ function buildCrowFrame(wingsUp) {
 // under it, matching Chrome dino's low pterodactyl.
 var CROW_FLIGHT_Y = 150;
 
+//score before crows are allowed to spawn at all - see the gate in spawnObstacles()
+var CROW_MIN_SCORE = 150;
+
 function spawnObstacles() {
   if (distanceTravelled - lastObstacleSpawnDistance >= nextObstacleGap) {
     lastObstacleSpawnDistance = distanceTravelled;
@@ -1179,6 +1182,12 @@ function spawnObstacles() {
     // to 2-5), so the same middle cacti kept showing up. floor(random(1,8))
     // picks all seven (six cacti + crow) evenly.
     var rand = Math.floor(random(1,8));
+    // Crows only start showing up once the player has some room to react to
+    // a new obstacle type - matches Chrome dino, where pterodactyls are
+    // introduced partway into a run instead of from the very first obstacle.
+    if (rand === 7 && score < CROW_MIN_SCORE) {
+      rand = Math.floor(random(1,7));
+    }
     var isCrow = rand === 7;
     switch(rand) {
       case 1: obstacle.addImage(obstacle1);
