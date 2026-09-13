@@ -628,6 +628,9 @@ function setup() {
   cloudsGroup = new Group();
   obstaclesGroup = new Group();
 
+  crowFrame1 = buildCrowFrame(true);
+  crowFrame2 = buildCrowFrame(false);
+
   score = 0;
   trexVY = 0;
   lastFrameMillis = millis();
@@ -1118,6 +1121,44 @@ function spawnClouds() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Crow - a flying obstacle, drawn procedurally since the project ships no
+// bird artwork. Two wing-flap frames feed into the same addAnimation()/
+// imageProfile() pipeline every other obstacle uses, so silhouette collision,
+// scaling and off-screen removal all just work without any special-casing.
+// ---------------------------------------------------------------------------
+var CROW_WIDTH = 46;
+var CROW_HEIGHT = 30;
+var crowFrame1, crowFrame2;
+
+function buildCrowFrame(wingsUp) {
+  var g = createGraphics(CROW_WIDTH, CROW_HEIGHT);
+  g.clear();
+  g.noStroke();
+  g.fill(40, 40, 40);
+
+  //body and head
+  g.ellipse(CROW_WIDTH / 2, CROW_HEIGHT / 2, 20, 11);
+  g.ellipse(CROW_WIDTH / 2 + 11, CROW_HEIGHT / 2 - 3, 10, 9);
+  //beak
+  g.triangle(CROW_WIDTH / 2 + 15, CROW_HEIGHT / 2 - 4,
+             CROW_WIDTH / 2 + 23, CROW_HEIGHT / 2 - 1,
+             CROW_WIDTH / 2 + 15, CROW_HEIGHT / 2 + 1);
+
+  //wings as a wide V - raised mid-flap or lowered, for the two animation frames
+  var wingY = wingsUp ? CROW_HEIGHT / 2 - 13 : CROW_HEIGHT / 2 + 11;
+  g.triangle(CROW_WIDTH / 2, CROW_HEIGHT / 2, 2, wingY, CROW_WIDTH / 2 - 2, CROW_HEIGHT / 2 - 2);
+  g.triangle(CROW_WIDTH / 2, CROW_HEIGHT / 2, CROW_WIDTH - 2, wingY, CROW_WIDTH / 2 + 2, CROW_HEIGHT / 2 - 2);
+
+  return g.get();
+}
+
+// Where a crow's center sits in world y. Chosen so its bottom edge (~157.5,
+// once scaled) clears the crouched trex's top (~159, see CROUCH_HEIGHT_FACTOR)
+// but overlaps the standing trex's top (~138) - ducking is required to pass
+// under it, matching Chrome dino's low pterodactyl.
+var CROW_FLIGHT_Y = 150;
+
 function spawnObstacles() {
   if (distanceTravelled - lastObstacleSpawnDistance >= nextObstacleGap) {
     lastObstacleSpawnDistance = distanceTravelled;
@@ -1128,9 +1169,10 @@ function spawnObstacles() {
 
     // Math.round(random(1,6)) only gave types 1 and 6 half the chance of the
     // others (round maps a 0.5-wide band to each end but a full 1.0-wide band
-    // to 2-5), so the same middle cacti kept showing up. floor(random(1,7))
-    // picks all six evenly.
-    var rand = Math.floor(random(1,7));
+    // to 2-5), so the same middle cacti kept showing up. floor(random(1,8))
+    // picks all seven (six cacti + crow) evenly.
+    var rand = Math.floor(random(1,8));
+    var isCrow = rand === 7;
     switch(rand) {
       case 1: obstacle.addImage(obstacle1);
               break;
@@ -1144,6 +1186,9 @@ function spawnObstacles() {
               break;
       case 6: obstacle.addImage(obstacle6);
               break;
+      case 7: obstacle.addAnimation("flying", crowFrame1, crowFrame2);
+              obstacle.animation.frameDelay = 8;
+              break;
       default: break;
     }
 
@@ -1151,13 +1196,18 @@ function spawnObstacles() {
     obstacle.scale = 0.5;
     obstacle.lifetime = -1;
 
-    // All six obstacle images are spawned at the same fixed y regardless of
-    // their actual height (35px drawn for obstacle1-3, 50px for obstacle4-6),
-    // so the short cacti floated visibly above the ground line while the
-    // tall ones sank into it. Re-anchor so every obstacle's bottom lands on
-    // the same ground surface, matching where the trex's own feet rest.
-    var drawnHeight = obstacle.animation.getFrameImage().height * Math.abs(obstacle._getScaleY());
-    obstacle.y = GROUND_SURFACE_Y - drawnHeight / 2;
+    if (isCrow) {
+      //flies at a fixed height instead of resting on the ground - see CROW_FLIGHT_Y
+      obstacle.y = CROW_FLIGHT_Y;
+    } else {
+      // All six cactus images are spawned at the same fixed y regardless of
+      // their actual height (35px drawn for obstacle1-3, 50px for obstacle4-6),
+      // so the short cacti floated visibly above the ground line while the
+      // tall ones sank into it. Re-anchor so every obstacle's bottom lands on
+      // the same ground surface, matching where the trex's own feet rest.
+      var drawnHeight = obstacle.animation.getFrameImage().height * Math.abs(obstacle._getScaleY());
+      obstacle.y = GROUND_SURFACE_Y - drawnHeight / 2;
+    }
 
     // Sprite x is its CENTER, so spawning every obstacle at a fixed x=600
     // (the canvas width) put up to half its width already inside the visible
