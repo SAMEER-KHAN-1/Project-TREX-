@@ -630,6 +630,7 @@ function setup() {
 
   crowFrame1 = buildCrowFrame(true);
   crowFrame2 = buildCrowFrame(false);
+  boulderImage = buildBoulderImage();
 
   score = 0;
   trexVY = 0;
@@ -1169,6 +1170,44 @@ var CROW_FLIGHT_Y = 150;
 //score before crows are allowed to spawn at all - see the gate in spawnObstacles()
 var CROW_MIN_SCORE = 150;
 
+// ---------------------------------------------------------------------------
+// Boulder - a ground obstacle, drawn procedurally like the crow. Unlike the
+// six cacti (all tall and thin), it's low and wide, so it reads as a
+// genuinely different shape to react to rather than another spiky plant.
+// ---------------------------------------------------------------------------
+var BOULDER_WIDTH = 70;
+var BOULDER_HEIGHT = 46;
+var boulderImage;
+
+function buildBoulderImage() {
+  var g = createGraphics(BOULDER_WIDTH, BOULDER_HEIGHT);
+  g.clear();
+  g.noStroke();
+
+  //irregular rock outline instead of a plain ellipse, so it doesn't read as a boulder-shaped blob
+  g.fill(95, 90, 85);
+  g.beginShape();
+  g.vertex(4, BOULDER_HEIGHT - 2);
+  g.vertex(0, BOULDER_HEIGHT * 0.55);
+  g.vertex(BOULDER_WIDTH * 0.18, BOULDER_HEIGHT * 0.2);
+  g.vertex(BOULDER_WIDTH * 0.45, 0);
+  g.vertex(BOULDER_WIDTH * 0.75, BOULDER_HEIGHT * 0.12);
+  g.vertex(BOULDER_WIDTH - 2, BOULDER_HEIGHT * 0.5);
+  g.vertex(BOULDER_WIDTH - 6, BOULDER_HEIGHT - 2);
+  g.endShape(CLOSE);
+
+  //a lighter facet and a darker crack give it some depth instead of a flat fill
+  g.fill(120, 114, 108);
+  g.triangle(BOULDER_WIDTH * 0.45, BOULDER_HEIGHT * 0.15,
+             BOULDER_WIDTH * 0.7, BOULDER_HEIGHT * 0.2,
+             BOULDER_WIDTH * 0.5, BOULDER_HEIGHT * 0.55);
+  g.stroke(70, 66, 62);
+  g.strokeWeight(1);
+  g.line(BOULDER_WIDTH * 0.3, BOULDER_HEIGHT * 0.5, BOULDER_WIDTH * 0.4, BOULDER_HEIGHT - 4);
+
+  return g.get();
+}
+
 function spawnObstacles() {
   if (distanceTravelled - lastObstacleSpawnDistance >= nextObstacleGap) {
     lastObstacleSpawnDistance = distanceTravelled;
@@ -1179,9 +1218,9 @@ function spawnObstacles() {
 
     // Math.round(random(1,6)) only gave types 1 and 6 half the chance of the
     // others (round maps a 0.5-wide band to each end but a full 1.0-wide band
-    // to 2-5), so the same middle cacti kept showing up. floor(random(1,8))
-    // picks all seven (six cacti + crow) evenly.
-    var rand = Math.floor(random(1,8));
+    // to 2-5), so the same middle cacti kept showing up. floor(random(1,9))
+    // picks all eight (six cacti + crow + boulder) evenly.
+    var rand = Math.floor(random(1,9));
     // Crows only start showing up once the player has some room to react to
     // a new obstacle type - matches Chrome dino, where pterodactyls are
     // introduced partway into a run instead of from the very first obstacle.
@@ -1205,6 +1244,8 @@ function spawnObstacles() {
       case 7: obstacle.addAnimation("flying", crowFrame1, crowFrame2);
               obstacle.animation.frameDelay = 8;
               playCrowSound();
+              break;
+      case 8: obstacle.addImage(boulderImage);
               break;
       default: break;
     }
