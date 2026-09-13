@@ -884,6 +884,44 @@ function drawStars(alpha) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Parallax hills
+//
+// A second scrolling layer, farther back than the ground, so the background
+// reads as having depth instead of just one moving strip. It scrolls at a
+// fraction of the ground's speed - the classic parallax cue for "farther
+// away" - tied to distanceTravelled like everything else so it stays in
+// sync with the game's own pace (TIME_SCALE, speed ramp) rather than
+// running on a separate clock.
+// ---------------------------------------------------------------------------
+var HILLS_PARALLAX_FACTOR = 0.35;
+var HILLS_TILE_WIDTH = 300;
+//one tile's worth of bumps: x offset within the tile, and each ellipse's width/height
+var HILLS_BUMPS = [
+  { x: 30, w: 130, h: 60 },
+  { x: 130, w: 100, h: 40 },
+  { x: 230, w: 150, h: 70 }
+];
+var HILLS_DAY_COLOR = [193, 168, 130];
+var HILLS_NIGHT_COLOR = [30, 32, 52];
+
+function drawHills(groundLineY, nightAmount) {
+  var color = blendRgb(HILLS_DAY_COLOR, HILLS_NIGHT_COLOR, nightAmount);
+  fill(color[0], color[1], color[2]);
+
+  //only the top arc of each ellipse ends up visible - the sand rect drawn
+  //right after this covers everything from groundLineY down
+  var scrollX = -((distanceTravelled * HILLS_PARALLAX_FACTOR) % HILLS_TILE_WIDTH);
+  var tileCount = Math.ceil(GAME_WIDTH / HILLS_TILE_WIDTH) + 2;
+  for (var t = -1; t < tileCount; t++) {
+    var tileX = scrollX + t * HILLS_TILE_WIDTH;
+    for (var i = 0; i < HILLS_BUMPS.length; i++) {
+      var bump = HILLS_BUMPS[i];
+      ellipse(tileX + bump.x, groundLineY, bump.w, bump.h);
+    }
+  }
+}
+
 function draw() {
   //trex.debug = true;
 
@@ -914,6 +952,9 @@ function draw() {
   noStroke();
   //painted before drawSprites(), so clouds and the trex pass in front of them
   drawStars(255 * nightAmount);
+  //drawn before the sand rect, which covers everything below the ground line
+  //and leaves just the hill tops poking above the horizon
+  drawHills(viewOffsetY + 178, nightAmount);
   var sand = blendRgb(DAY_SAND, NIGHT_SAND, nightAmount);
   fill(sand[0], sand[1], sand[2]);
   //from the ground line all the way to the bottom of the screen
