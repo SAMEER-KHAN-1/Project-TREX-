@@ -3,6 +3,7 @@ var END = 0;
 var PAUSED = 2;
 var MENU = 3;
 var MULTIPLAYER_MENU = 4;
+var MULTIPLAYER_WAITING = 5;
 var gameState = MENU;
 
 var trex, trex_running, trex_collided;
@@ -452,6 +453,111 @@ function isOverRestart(x, y) {
 }
 
 // ---------------------------------------------------------------------------
+// Multiplayer networking
+//
+// A thin wrapper around one WebSocket connection to the room-relay server
+// (see server/server.js). This server is NOT authoritative - it only hands
+// out room codes and relays messages between the two players in a room. Both
+// clients run the actual game themselves, in lockstep, because they're both
+// seeded with the same random seed from the "start" message: obstacle
+// spawning is deterministic from that seed, so there is nothing to
+// synchronize there. The only live network traffic is each player's own
+// trex height/crouch/alive state, so the other player can be rendered.
+// ---------------------------------------------------------------------------
+
+// TODO: replace with your deployed server's URL once it's live on Render,
+// e.g. "wss://trex-multiplayer-server.onrender.com" (wss:// - not ws://-
+// since a page served over https can't open a plain ws:// socket).
+var MULTIPLAYER_SERVER_URL = "wss://YOUR-SERVER-URL-HERE.onrender.com";
+
+var mpSocket = null;
+var mpRoomCode = null;
+var mpSeed = null;
+var mpStartAt = null;
+var mpConnectionMessage = null;
+
+function mpDisconnect() {
+  if (mpSocket) {
+    //no-op handlers first so the close below doesn't bounce us back into
+    //the menu a second time via onclose's own error-handling path
+    mpSocket.onopen = null;
+    mpSocket.onmessage = null;
+    mpSocket.onerror = null;
+    mpSocket.onclose = null;
+    if (mpSocket.readyState === WebSocket.OPEN) {
+      mpSocket.send(JSON.stringify({ type: "leave" }));
+    }
+    mpSocket.close();
+  }
+  mpSocket = null;
+  mpRoomCode = null;
+  mpSeed = null;
+  mpStartAt = null;
+}
+
+function mpHandleMessage(msg) {
+  if (msg.type === "created") {
+    mpRoomCode = msg.room;
+  } else if (msg.type === "start") {
+    mpSeed = msg.seed;
+    mpStartAt = msg.startAt;
+  } else if (msg.type === "error") {
+    mpConnectionMessage = msg.message;
+    mpDisconnect();
+    gameState = MULTIPLAYER_MENU;
+  } else if (msg.type === "opponent_left") {
+    mpConnectionMessage = "Opponent disconnected.";
+    mpDisconnect();
+    gameState = MULTIPLAYER_MENU;
+  }
+}
+
+//onReady fires once the socket is actually open, since sending before then
+//silently fails
+function mpConnect(onReady) {
+  mpConnectionMessage = null;
+  try {
+    mpSocket = new WebSocket(MULTIPLAYER_SERVER_URL);
+  } catch (e) {
+    mpConnectionMessage = "Couldn't reach the multiplayer server.";
+    return;
+  }
+
+  mpSocket.onopen = function () {
+    if (onReady) {
+      onReady();
+    }
+  };
+  mpSocket.onmessage = function (evt) {
+    var msg;
+    try {
+      msg = JSON.parse(evt.data);
+    } catch (e) {
+      return; //ignore malformed messages rather than crash the game
+    }
+    mpHandleMessage(msg);
+  };
+  mpSocket.onerror = function () {
+    mpConnectionMessage = "Couldn't reach the multiplayer server.";
+  };
+  mpSocket.onclose = function () {
+    //a close that wasn't triggered by our own mpDisconnect() means the
+    //server or network dropped us - only worth reporting while a
+    //multiplayer screen is actually showing, not after leaving on purpose
+    if (gameState === MULTIPLAYER_WAITING) {
+      mpConnectionMessage = mpConnectionMessage || "Lost connection to the server.";
+      gameState = MULTIPLAYER_MENU;
+    }
+  };
+}
+
+function mpCreateRoom() {
+  mpConnect(function () {
+    mpSocket.send(JSON.stringify({ type: "create" }));
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Main menu - single player vs multiplayer
 //
 // Buttons are stored as {x, y, w, h} centered rectangles (matching how
@@ -461,6 +567,8 @@ function isOverRestart(x, y) {
 var MENU_SINGLE_PLAYER_BUTTON = { x: 300, y: 110, w: 240, h: 32 };
 var MENU_MULTIPLAYER_BUTTON = { x: 300, y: 152, w: 240, h: 32 };
 var MENU_BACK_BUTTON = { x: 300, y: 152, w: 160, h: 32 };
+var MULTIPLAYER_CREATE_BUTTON = { x: 300, y: 110, w: 240, h: 32 };
+var MULTIPLAYER_LEAVE_BUTTON = { x: 300, y: 172, w: 160, h: 28 };
 
 function isOverButton(button, x, y) {
   return Math.abs(x - button.x) <= button.w / 2 &&
@@ -472,6 +580,8 @@ function isOverButton(button, x, y) {
 var menuSinglePlayerRequested = false;
 var menuMultiplayerRequested = false;
 var menuBackRequested = false;
+var multiplayerCreateRequested = false;
+var multiplayerLeaveRequested = false;
 
 function onCanvasPointerDown(evt) {
   var point = canvasPointerToGame(evt);
@@ -487,8 +597,14 @@ function onCanvasPointerDown(evt) {
       menuMultiplayerRequested = true;
     }
   } else if (gameState === MULTIPLAYER_MENU) {
-    if (isOverButton(MENU_BACK_BUTTON, point.x, point.y)) {
+    if (isOverButton(MULTIPLAYER_CREATE_BUTTON, point.x, point.y)) {
+      multiplayerCreateRequested = true;
+    } else if (isOverButton(MENU_BACK_BUTTON, point.x, point.y)) {
       menuBackRequested = true;
+    }
+  } else if (gameState === MULTIPLAYER_WAITING) {
+    if (isOverButton(MULTIPLAYER_LEAVE_BUTTON, point.x, point.y)) {
+      multiplayerLeaveRequested = true;
     }
   }
 }
@@ -520,18 +636,51 @@ function drawMenuScreen(textShade) {
   drawButton(MENU_MULTIPLAYER_BUTTON, "MULTIPLAYER");
 }
 
-function drawMultiplayerStubScreen(textShade) {
+function drawMultiplayerMenuScreen(textShade) {
   push();
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
   fill(textShade);
   textSize(14);
-  text("MULTIPLAYER", GAME_WIDTH / 2, 60);
-  textSize(9);
-  text("Coming soon...", GAME_WIDTH / 2, 95);
+  text("MULTIPLAYER", GAME_WIDTH / 2, 55);
+  if (mpConnectionMessage) {
+    textSize(8);
+    fill(200, 60, 60);
+    text(mpConnectionMessage, GAME_WIDTH / 2, 82);
+  }
   pop();
 
+  drawButton(MULTIPLAYER_CREATE_BUTTON, "CREATE ROOM");
   drawButton(MENU_BACK_BUTTON, "BACK");
+}
+
+function drawMultiplayerWaitingScreen(textShade) {
+  push();
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+  fill(textShade);
+
+  if (!mpRoomCode) {
+    textSize(12);
+    text("Connecting...", GAME_WIDTH / 2, 70);
+  } else if (mpSeed === null) {
+    textSize(9);
+    text("ROOM CODE", GAME_WIDTH / 2, 55);
+    textSize(22);
+    text(mpRoomCode, GAME_WIDTH / 2, 85);
+    textSize(9);
+    text("Waiting for opponent...", GAME_WIDTH / 2, 115);
+  } else {
+    textSize(11);
+    fill(60, 160, 90);
+    text("Opponent connected!", GAME_WIDTH / 2, 70);
+    textSize(8);
+    fill(textShade);
+    text("(race coming in the next update)", GAME_WIDTH / 2, 95);
+  }
+  pop();
+
+  drawButton(MULTIPLAYER_LEAVE_BUTTON, "LEAVE");
 }
 
 var GAME_WIDTH = 600;
@@ -1251,10 +1400,22 @@ function draw() {
     }
   }
   else if (gameState === MULTIPLAYER_MENU) {
-    drawMultiplayerStubScreen(textShade);
-    if (menuBackRequested || keyWentDown("esc")) {
+    drawMultiplayerMenuScreen(textShade);
+    if (multiplayerCreateRequested) {
+      multiplayerCreateRequested = false;
+      mpCreateRoom();
+      gameState = MULTIPLAYER_WAITING;
+    } else if (menuBackRequested || keyWentDown("esc")) {
       menuBackRequested = false;
       gameState = MENU;
+    }
+  }
+  else if (gameState === MULTIPLAYER_WAITING) {
+    drawMultiplayerWaitingScreen(textShade);
+    if (multiplayerLeaveRequested || keyWentDown("esc")) {
+      multiplayerLeaveRequested = false;
+      mpDisconnect();
+      gameState = MULTIPLAYER_MENU;
     }
   }
 
