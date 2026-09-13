@@ -4,6 +4,7 @@ var PAUSED = 2;
 var MENU = 3;
 var MULTIPLAYER_MENU = 4;
 var MULTIPLAYER_WAITING = 5;
+var MULTIPLAYER_JOIN_ENTRY = 6;
 var gameState = MENU;
 
 var trex, trex_running, trex_collided;
@@ -557,6 +558,15 @@ function mpCreateRoom() {
   });
 }
 
+function mpJoinRoom(code) {
+  //shown immediately so the waiting screen has a room code to display for
+  //the joiner too, same as the creator gets back from the "created" message
+  mpRoomCode = code;
+  mpConnect(function () {
+    mpSocket.send(JSON.stringify({ type: "join", room: code }));
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Main menu - single player vs multiplayer
 //
@@ -566,9 +576,11 @@ function mpCreateRoom() {
 // ---------------------------------------------------------------------------
 var MENU_SINGLE_PLAYER_BUTTON = { x: 300, y: 110, w: 240, h: 32 };
 var MENU_MULTIPLAYER_BUTTON = { x: 300, y: 152, w: 240, h: 32 };
-var MENU_BACK_BUTTON = { x: 300, y: 152, w: 160, h: 32 };
-var MULTIPLAYER_CREATE_BUTTON = { x: 300, y: 110, w: 240, h: 32 };
+var MENU_BACK_BUTTON = { x: 300, y: 175, w: 160, h: 30 };
+var MULTIPLAYER_CREATE_BUTTON = { x: 300, y: 95, w: 240, h: 32 };
+var MULTIPLAYER_JOIN_BUTTON = { x: 300, y: 135, w: 240, h: 32 };
 var MULTIPLAYER_LEAVE_BUTTON = { x: 300, y: 172, w: 160, h: 28 };
+var MULTIPLAYER_JOIN_SUBMIT_BUTTON = { x: 300, y: 140, w: 160, h: 30 };
 
 function isOverButton(button, x, y) {
   return Math.abs(x - button.x) <= button.w / 2 &&
@@ -581,6 +593,8 @@ var menuSinglePlayerRequested = false;
 var menuMultiplayerRequested = false;
 var menuBackRequested = false;
 var multiplayerCreateRequested = false;
+var multiplayerJoinRequested = false;
+var multiplayerJoinSubmitRequested = false;
 var multiplayerLeaveRequested = false;
 
 function onCanvasPointerDown(evt) {
@@ -599,12 +613,20 @@ function onCanvasPointerDown(evt) {
   } else if (gameState === MULTIPLAYER_MENU) {
     if (isOverButton(MULTIPLAYER_CREATE_BUTTON, point.x, point.y)) {
       multiplayerCreateRequested = true;
+    } else if (isOverButton(MULTIPLAYER_JOIN_BUTTON, point.x, point.y)) {
+      multiplayerJoinRequested = true;
     } else if (isOverButton(MENU_BACK_BUTTON, point.x, point.y)) {
       menuBackRequested = true;
     }
   } else if (gameState === MULTIPLAYER_WAITING) {
     if (isOverButton(MULTIPLAYER_LEAVE_BUTTON, point.x, point.y)) {
       multiplayerLeaveRequested = true;
+    }
+  } else if (gameState === MULTIPLAYER_JOIN_ENTRY) {
+    if (isOverButton(MULTIPLAYER_JOIN_SUBMIT_BUTTON, point.x, point.y)) {
+      multiplayerJoinSubmitRequested = true;
+    } else if (isOverButton(MENU_BACK_BUTTON, point.x, point.y)) {
+      menuBackRequested = true;
     }
   }
 }
@@ -642,15 +664,16 @@ function drawMultiplayerMenuScreen(textShade) {
   textAlign(CENTER, CENTER);
   fill(textShade);
   textSize(14);
-  text("MULTIPLAYER", GAME_WIDTH / 2, 55);
+  text("MULTIPLAYER", GAME_WIDTH / 2, 40);
   if (mpConnectionMessage) {
     textSize(8);
     fill(200, 60, 60);
-    text(mpConnectionMessage, GAME_WIDTH / 2, 82);
+    text(mpConnectionMessage, GAME_WIDTH / 2, 62);
   }
   pop();
 
   drawButton(MULTIPLAYER_CREATE_BUTTON, "CREATE ROOM");
+  drawButton(MULTIPLAYER_JOIN_BUTTON, "JOIN ROOM");
   drawButton(MENU_BACK_BUTTON, "BACK");
 }
 
@@ -673,7 +696,7 @@ function drawMultiplayerWaitingScreen(textShade) {
   } else {
     textSize(11);
     fill(60, 160, 90);
-    text("Opponent connected!", GAME_WIDTH / 2, 70);
+    text("Match found!", GAME_WIDTH / 2, 70);
     textSize(8);
     fill(textShade);
     text("(race coming in the next update)", GAME_WIDTH / 2, 95);
@@ -681,6 +704,23 @@ function drawMultiplayerWaitingScreen(textShade) {
   pop();
 
   drawButton(MULTIPLAYER_LEAVE_BUTTON, "LEAVE");
+}
+
+function drawMultiplayerJoinEntryScreen(textShade) {
+  push();
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+  fill(textShade);
+  textSize(12);
+  text("JOIN ROOM", GAME_WIDTH / 2, 45);
+  textSize(8);
+  text("ENTER 4-CHARACTER CODE", GAME_WIDTH / 2, 65);
+  pop();
+  //the actual code entry box is the real HTML <input> positioned over the
+  //canvas here - see positionRoomCodeInput()
+
+  drawButton(MULTIPLAYER_JOIN_SUBMIT_BUTTON, "JOIN");
+  drawButton(MENU_BACK_BUTTON, "BACK");
 }
 
 var GAME_WIDTH = 600;
@@ -727,6 +767,84 @@ function fillScreen() {
 
 function windowResized() {
   fillScreen();
+  if (roomCodeInputElt && roomCodeInputElt.style.display !== "none") {
+    positionRoomCodeInput();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Room code input - a real HTML <input> overlaid on the canvas rather than a
+// canvas-drawn text field, so typing a room code on a phone actually pops up
+// the device's own keyboard (a canvas-drawn "text field" never focuses
+// anything, so touch users would otherwise have no way to type at all).
+// ---------------------------------------------------------------------------
+var roomCodeInputElt = null;
+
+function createRoomCodeInput() {
+  roomCodeInputElt = document.createElement("input");
+  roomCodeInputElt.type = "text";
+  roomCodeInputElt.maxLength = 4;
+  roomCodeInputElt.autocomplete = "off";
+  roomCodeInputElt.autocapitalize = "characters";
+  roomCodeInputElt.spellcheck = false;
+  roomCodeInputElt.style.position = "absolute";
+  roomCodeInputElt.style.display = "none";
+  roomCodeInputElt.style.textAlign = "center";
+  roomCodeInputElt.style.fontFamily = '"Press Start 2P", monospace';
+  roomCodeInputElt.style.letterSpacing = "4px";
+  roomCodeInputElt.style.border = "2px solid #32568f";
+  roomCodeInputElt.style.borderRadius = "4px";
+  roomCodeInputElt.style.boxSizing = "border-box";
+  roomCodeInputElt.style.textTransform = "uppercase";
+
+  //only letters/digits, uppercased, capped at 4 chars - matches the room
+  //codes the server actually generates (see ROOM_CODE_CHARS in server.js)
+  roomCodeInputElt.addEventListener("input", function () {
+    roomCodeInputElt.value = roomCodeInputElt.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
+  });
+  roomCodeInputElt.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      multiplayerJoinSubmitRequested = true;
+    }
+  });
+
+  document.body.appendChild(roomCodeInputElt);
+}
+
+function positionRoomCodeInput() {
+  var canvasElt = document.querySelector("canvas");
+  if (!canvasElt || !roomCodeInputElt) {
+    return;
+  }
+  var rect = canvasElt.getBoundingClientRect();
+  var scaleX = rect.width / width;
+  var scaleY = rect.height / height;
+  //centered at game-space (300, 95), matching where the join-entry screen
+  //draws its heading around
+  var gx = 300, gy = 95, gw = 180, gh = 34;
+  roomCodeInputElt.style.left = (rect.left + (gx - gw / 2) * scaleX) + "px";
+  roomCodeInputElt.style.top = (rect.top + (gy - gh / 2 + viewOffsetY) * scaleY) + "px";
+  roomCodeInputElt.style.width = (gw * scaleX) + "px";
+  roomCodeInputElt.style.height = (gh * scaleY) + "px";
+  roomCodeInputElt.style.fontSize = Math.round(18 * scaleY) + "px";
+}
+
+function showRoomCodeInput() {
+  if (!roomCodeInputElt) {
+    return;
+  }
+  roomCodeInputElt.value = "";
+  roomCodeInputElt.style.display = "block";
+  positionRoomCodeInput();
+  roomCodeInputElt.focus();
+}
+
+function hideRoomCodeInput() {
+  if (!roomCodeInputElt) {
+    return;
+  }
+  roomCodeInputElt.style.display = "none";
+  roomCodeInputElt.blur();
 }
 
 // Browsers only allow real fullscreen (hiding tabs and the address bar) to
@@ -773,6 +891,13 @@ function tryAutoFullscreen() {
 }
 
 function onKeyDownForFullscreen(e) {
+  // Typing a room code focuses a real <input> (see createRoomCodeInput()),
+  // and the room codes the server generates can contain "F" - without this
+  // guard, typing one mid-code would also toggle fullscreen out from under
+  // the player.
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) {
+    return;
+  }
   if (e.key === "f" || e.key === "F") {
     if (!e.repeat) {
       fullscreenAutoTried = true;
@@ -821,6 +946,8 @@ function setup() {
   if (canvasElt) {
     canvasElt.addEventListener("pointerdown", onCanvasPointerDown);
   }
+
+  createRoomCodeInput();
 
   // Let draw() run as fast as the browser will grant (matches the
   // monitor's native refresh rate - 60/144/240Hz - instead of a fixed cap).
@@ -928,6 +1055,13 @@ var muteKeyWasDown = false;
 
 //toggle on a fresh press of M, not every frame it's held
 function handleMuteToggle() {
+  // Unlike handlePauseToggle() below, this has no gameState gate, so without
+  // this check typing "M" as part of a room code (a valid character - see
+  // ROOM_CODE_CHARS in server.js) would also toggle mute, since p5's own key
+  // tracking doesn't know or care whether a text <input> has focus.
+  if (roomCodeInputElt && document.activeElement === roomCodeInputElt) {
+    return;
+  }
   var muteKeyIsDown = keyHeld("m");
   if (muteKeyIsDown && !muteKeyWasDown) {
     soundMuted = !soundMuted;
@@ -1405,6 +1539,11 @@ function draw() {
       multiplayerCreateRequested = false;
       mpCreateRoom();
       gameState = MULTIPLAYER_WAITING;
+    } else if (multiplayerJoinRequested) {
+      multiplayerJoinRequested = false;
+      mpConnectionMessage = null;
+      gameState = MULTIPLAYER_JOIN_ENTRY;
+      showRoomCodeInput();
     } else if (menuBackRequested || keyWentDown("esc")) {
       menuBackRequested = false;
       gameState = MENU;
@@ -1415,6 +1554,22 @@ function draw() {
     if (multiplayerLeaveRequested || keyWentDown("esc")) {
       multiplayerLeaveRequested = false;
       mpDisconnect();
+      gameState = MULTIPLAYER_MENU;
+    }
+  }
+  else if (gameState === MULTIPLAYER_JOIN_ENTRY) {
+    drawMultiplayerJoinEntryScreen(textShade);
+    if (multiplayerJoinSubmitRequested) {
+      multiplayerJoinSubmitRequested = false;
+      var enteredCode = roomCodeInputElt ? roomCodeInputElt.value : "";
+      if (enteredCode.length === 4) {
+        hideRoomCodeInput();
+        mpJoinRoom(enteredCode);
+        gameState = MULTIPLAYER_WAITING;
+      }
+    } else if (menuBackRequested || keyWentDown("esc")) {
+      menuBackRequested = false;
+      hideRoomCodeInput();
       gameState = MULTIPLAYER_MENU;
     }
   }
