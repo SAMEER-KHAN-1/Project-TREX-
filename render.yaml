@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: trex-multiplayer-server
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free
+    envVars:
+      - key: NODE_VERSION
+        value: 18.20.4

@@ -1,0 +1,15 @@
+{
+  "name": "trex-multiplayer-server",
+  "version": "1.0.0",
+  "description": "WebSocket room relay for T-Rex Runner multiplayer races",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
