@@ -1170,6 +1170,29 @@ var CROW_FLIGHT_Y = 150;
 //score before crows are allowed to spawn at all - see the gate in spawnObstacles()
 var CROW_MIN_SCORE = 150;
 
+// Past this score, a spawned crow has a chance of bringing a second crow
+// close behind it at a much lower altitude - low enough it can't be ducked
+// under, so it forces a duck immediately followed by a jump instead of just
+// one reaction. Held back behind CROW_MIN_SCORE so single crows get
+// introduced first, on their own.
+var CROW_PAIR_MIN_SCORE = 400;
+var CROW_PAIR_CHANCE = 0.35;
+var CROW_PAIR_GAP_PX = 90;
+var CROW_COMPANION_FLIGHT_Y = 172;
+
+function spawnCrowCompanion(lead) {
+  var companion = createSprite(600, 165, 10, 40);
+  companion.addAnimation("flying", crowFrame1, crowFrame2);
+  companion.animation.frameDelay = 8;
+  companion.scale = 0.5;
+  companion.lifetime = -1;
+  companion.baseVelocityX = lead.baseVelocityX;
+  companion.y = CROW_COMPANION_FLIGHT_Y;
+  //trails the lead crow in from off-screen at a fixed gap, so the pair scrolls in together
+  companion.x = lead.x + CROW_PAIR_GAP_PX;
+  obstaclesGroup.add(companion);
+}
+
 // ---------------------------------------------------------------------------
 // Boulder - a ground obstacle, drawn procedurally like the crow. Unlike the
 // six cacti (all tall and thin), it's low and wide, so it reads as a
@@ -1276,6 +1299,10 @@ function spawnObstacles() {
 
     //add each obstacle to the group
     obstaclesGroup.add(obstacle);
+
+    if (isCrow && score >= CROW_PAIR_MIN_SCORE && random() < CROW_PAIR_CHANCE) {
+      spawnCrowCompanion(obstacle);
+    }
 
     lastObstacleWidth = obstacle.width * obstacle.scale;
     nextObstacleGap = rollObstacleGap();
