@@ -466,10 +466,33 @@ function isOverRestart(x, y) {
 // trex height/crouch/alive state, so the other player can be rendered.
 // ---------------------------------------------------------------------------
 
-// TODO: replace with your deployed server's URL once it's live on Render,
-// e.g. "wss://trex-multiplayer-server.onrender.com" (wss:// - not ws://-
-// since a page served over https can't open a plain ws:// socket).
-var MULTIPLAYER_SERVER_URL = "wss://YOUR-SERVER-URL-HERE.onrender.com";
+// Where to find the relay. The server hosts these game files itself (see the
+// static-hosting block in server/server.js), so in every normal case the
+// socket lives at the exact address this page was loaded from - which means
+// no URL needs hardcoding or editing per environment. Running on localhost,
+// on a phone over wifi, and deployed to Render all resolve correctly from
+// location alone.
+//
+// Two escape hatches on top of that:
+//   - ?server=wss://host  overrides it outright, for pointing a local page at
+//     a deployed relay (or vice versa) without touching this file.
+//   - Opening index.html straight off the disk as a file:// URL has no host to
+//     derive anything from, so that case falls back to a local server.
+var MULTIPLAYER_SERVER_FALLBACK = "ws://localhost:8080";
+
+function resolveServerUrl() {
+  var override = /[?&]server=([^&]+)/.exec(window.location.search);
+  if (override) {
+    return decodeURIComponent(override[1]);
+  }
+  if (window.location.protocol === "file:" || !window.location.host) {
+    return MULTIPLAYER_SERVER_FALLBACK;
+  }
+  //wss:// for an https page - a secure page is not allowed to open a plain
+  //ws:// socket, and the browser blocks it outright rather than warning
+  var scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return scheme + "//" + window.location.host;
+}
 
 var mpSocket = null;
 var mpRoomCode = null;
@@ -518,7 +541,7 @@ function mpHandleMessage(msg) {
 function mpConnect(onReady) {
   mpConnectionMessage = null;
   try {
-    mpSocket = new WebSocket(MULTIPLAYER_SERVER_URL);
+    mpSocket = new WebSocket(resolveServerUrl());
   } catch (e) {
     mpConnectionMessage = "Couldn't reach the multiplayer server.";
     return;
