@@ -5,6 +5,8 @@ var MENU = 3;
 var MULTIPLAYER_MENU = 4;
 var MULTIPLAYER_WAITING = 5;
 var MULTIPLAYER_JOIN_ENTRY = 6;
+var MULTIPLAYER_COUNTDOWN = 7;
+var MULTIPLAYER_RESULT = 8;
 var gameState = MENU;
 
 var trex, trex_running, trex_collided;
@@ -577,8 +579,29 @@ function resolveServerUrl() {
 var mpSocket = null;
 var mpRoomCode = null;
 var mpSeed = null;
-var mpStartAt = null;
 var mpConnectionMessage = null;
+
+// Race state. mpIsRacing is what tells the shared gameplay code it is running
+// a race rather than a solo run - it gates restarting (which would desync a
+// race), and routes death to the result screen instead of Game Over.
+var mpIsRacing = false;
+//local clock time the race begins - see the countdownMs comment in server.js
+var mpRaceStartMillis = 0;
+var mpSelfScore = 0;
+var mpSelfFinished = false;
+var mpOpponentFinished = false;
+//null means the opponent quit rather than finishing a run
+var mpOpponentScore = null;
+var mpOpponentLeft = false;
+
+function mpResetRaceState() {
+  mpIsRacing = false;
+  mpSelfFinished = false;
+  mpOpponentFinished = false;
+  mpOpponentScore = null;
+  mpOpponentLeft = false;
+  mpSelfScore = 0;
+}
 
 function mpDisconnect() {
   if (mpSocket) {
@@ -595,8 +618,10 @@ function mpDisconnect() {
   }
   mpSocket = null;
   mpRoomCode = null;
+  //must be cleared, or the next single-player run would keep replaying the
+  //race's course - nextRunSeed() prefers mpSeed whenever it is set
   mpSeed = null;
-  mpStartAt = null;
+  mpResetRaceState();
 }
 
 function mpHandleMessage(msg) {
@@ -604,16 +629,61 @@ function mpHandleMessage(msg) {
     mpRoomCode = msg.room;
   } else if (msg.type === "start") {
     mpSeed = msg.seed;
-    mpStartAt = msg.startAt;
+    mpResetRaceState();
+    //counted from right now on this device's own clock, which is the whole
+    //reason the server sends a duration instead of a timestamp
+    mpRaceStartMillis = millis() + msg.countdownMs;
+    countdownSecondBeeped = null;
+    // Clear the board before the countdown rather than when it ends, so the
+    // player counts down over a fresh starting line - otherwise a rematch
+    // would tick 3-2-1 over the previous run's crashed trex and dead cacti.
+    resetGame(MULTIPLAYER_COUNTDOWN);
+  } else if (msg.type === "opponent_finished") {
+    mpOpponentFinished = true;
+    mpOpponentScore = msg.score;
   } else if (msg.type === "error") {
     mpConnectionMessage = msg.message;
     mpDisconnect();
     gameState = MULTIPLAYER_MENU;
   } else if (msg.type === "opponent_left") {
-    mpConnectionMessage = "Opponent disconnected.";
-    mpDisconnect();
-    gameState = MULTIPLAYER_MENU;
+    if (mpIsRacing) {
+      // Mid-race, a departure is a forfeit, not an error - the player is
+      // still owed a result screen for the run they just did (or are still
+      // doing), so deliberately don't tear the session down here.
+      mpOpponentLeft = true;
+      mpOpponentFinished = true;
+      mpOpponentScore = null;
+    } else {
+      mpConnectionMessage = "Opponent disconnected.";
+      mpDisconnect();
+      gameState = MULTIPLAYER_MENU;
+    }
   }
+}
+
+// Called the moment this player crashes. The opponent may still be running,
+// so this does not decide a winner - it just reports the final score and
+// moves to the result screen, which waits for the other side.
+function mpFinish(finalScore) {
+  mpSelfFinished = true;
+  mpSelfScore = finalScore;
+  if (mpSocket && mpSocket.readyState === WebSocket.OPEN) {
+    mpSocket.send(JSON.stringify({ type: "finished", score: finalScore }));
+  }
+  gameState = MULTIPLAYER_RESULT;
+}
+
+function startRace() {
+  mpResetRaceState();
+  mpIsRacing = true;
+  //seeds the course from mpSeed via nextRunSeed(), and sets gameState to PLAY
+  resetGame(PLAY);
+}
+
+//leaving a race for any reason - crashed out, quit early, or opponent gone
+function leaveRace() {
+  mpDisconnect();
+  returnToMenu();
 }
 
 //onReady fires once the socket is actually open, since sending before then
@@ -728,7 +798,9 @@ function onCanvasPointerDown(evt) {
     } else if (isOverButton(MENU_BACK_BUTTON, point.x, point.y)) {
       menuBackRequested = true;
     }
-  } else if (gameState === MULTIPLAYER_WAITING) {
+  } else if (gameState === MULTIPLAYER_WAITING ||
+             gameState === MULTIPLAYER_COUNTDOWN ||
+             gameState === MULTIPLAYER_RESULT) {
     if (isOverButton(MULTIPLAYER_LEAVE_BUTTON, point.x, point.y)) {
       multiplayerLeaveRequested = true;
     }
@@ -796,24 +868,116 @@ function drawMultiplayerWaitingScreen(textShade) {
   if (!mpRoomCode) {
     textSize(12);
     text("Connecting...", GAME_WIDTH / 2, 70);
-  } else if (mpSeed === null) {
+  } else {
     textSize(9);
     text("ROOM CODE", GAME_WIDTH / 2, 55);
     textSize(22);
     text(mpRoomCode, GAME_WIDTH / 2, 85);
     textSize(9);
     text("Waiting for opponent...", GAME_WIDTH / 2, 115);
-  } else {
-    textSize(11);
-    fill(60, 160, 90);
-    text("Match found!", GAME_WIDTH / 2, 70);
-    textSize(8);
-    fill(textShade);
-    text("(race coming in the next update)", GAME_WIDTH / 2, 95);
   }
   pop();
 
   drawButton(MULTIPLAYER_LEAVE_BUTTON, "LEAVE");
+}
+
+// ---------------------------------------------------------------------------
+// Race countdown
+//
+// Both players sit here for the same duration, measured on their own clock
+// from when the server's "start" arrived, so they begin running together.
+// ---------------------------------------------------------------------------
+
+//which second was last beeped, so each tick sounds exactly once rather than
+//once per frame
+var countdownSecondBeeped = null;
+
+function playCountdownTick(isFinal) {
+  if (isFinal) {
+    playTone(880, 0.25, "square");
+  } else {
+    playTone(440, 0.12, "square");
+  }
+}
+
+function drawMultiplayerCountdownScreen(textShade) {
+  var remainingMs = mpRaceStartMillis - millis();
+  var secondsLeft = Math.ceil(remainingMs / 1000);
+  var label = remainingMs > 0 ? String(secondsLeft) : "GO!";
+
+  //beep once as each number appears, and once more on GO
+  var beepKey = remainingMs > 0 ? secondsLeft : 0;
+  if (countdownSecondBeeped !== beepKey) {
+    countdownSecondBeeped = beepKey;
+    playCountdownTick(beepKey === 0);
+  }
+
+  push();
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+  fill(textShade);
+  textSize(9);
+  text("ROOM " + (mpRoomCode || "?") + "  -  SAME COURSE FOR BOTH", GAME_WIDTH / 2, 55);
+  if (remainingMs > 0) {
+    textSize(44);
+    fill(textShade);
+  } else {
+    textSize(30);
+    fill(60, 160, 90);
+  }
+  text(label, GAME_WIDTH / 2, 110);
+  pop();
+}
+
+// ---------------------------------------------------------------------------
+// Race result
+//
+// Reached the instant this player crashes, whether or not the opponent has.
+// Until their final score arrives this is a waiting room showing your own.
+// ---------------------------------------------------------------------------
+function drawMultiplayerResultScreen(textShade) {
+  push();
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+
+  if (!mpOpponentFinished) {
+    fill(textShade);
+    textSize(12);
+    text("YOU CRASHED", GAME_WIDTH / 2, 50);
+    textSize(9);
+    text("SCORE " + padScore(mpSelfScore), GAME_WIDTH / 2, 75);
+    text("Waiting for opponent...", GAME_WIDTH / 2, 100);
+  } else if (mpOpponentLeft) {
+    fill(60, 160, 90);
+    textSize(16);
+    text("YOU WIN", GAME_WIDTH / 2, 55);
+    fill(textShade);
+    textSize(8);
+    text("Opponent left the race", GAME_WIDTH / 2, 82);
+    textSize(9);
+    text("SCORE " + padScore(mpSelfScore), GAME_WIDTH / 2, 105);
+  } else {
+    var won = mpSelfScore > mpOpponentScore;
+    var tied = mpSelfScore === mpOpponentScore;
+    textSize(16);
+    if (tied) {
+      fill(textShade);
+      text("DEAD HEAT", GAME_WIDTH / 2, 50);
+    } else if (won) {
+      fill(60, 160, 90);
+      text("YOU WIN", GAME_WIDTH / 2, 50);
+    } else {
+      fill(200, 60, 60);
+      text("YOU LOSE", GAME_WIDTH / 2, 50);
+    }
+    fill(textShade);
+    textSize(10);
+    text("YOU " + padScore(mpSelfScore), GAME_WIDTH / 2, 82);
+    text("THEM " + padScore(mpOpponentScore), GAME_WIDTH / 2, 102);
+  }
+  pop();
+
+  drawButton(MULTIPLAYER_LEAVE_BUTTON, "MENU");
 }
 
 function drawMultiplayerJoinEntryScreen(textShade) {
@@ -1194,7 +1358,10 @@ var pauseKeyWasDown = false;
 
 function handlePauseToggle() {
   var pauseKeyIsDown = keyHeld("p");
-  if (pauseKeyIsDown && !pauseKeyWasDown) {
+  // Pausing a race would be a free timeout - the opponent's run keeps going
+  // on their own machine regardless, so this would only ever hand the pauser
+  // thinking time they haven't earned.
+  if (pauseKeyIsDown && !pauseKeyWasDown && !mpIsRacing) {
     if (gameState === PLAY) {
       gameState = PAUSED;
       ground.velocityX = 0;
@@ -1594,10 +1761,16 @@ function draw() {
     spawnObstacles();
 
     if(trexHitsAnyObstacle()){
-        gameState = END;
         setCrouching(false);
         playDeathSound();
         deathEffectStartMillis = millis();
+        //a race crash goes to the result screen instead of Game Over: there is
+        //no restarting mid-race, and the opponent may still be running
+        if (mpIsRacing) {
+          mpFinish(Math.floor(score));
+        } else {
+          gameState = END;
+        }
         // Seed the "was this key already down" baseline with whatever the
         // player happens to be holding at the moment of death (very often
         // the jump key, since that's what you'd be pressing mid-obstacle).
@@ -1676,6 +1849,32 @@ function draw() {
       multiplayerLeaveRequested = false;
       mpDisconnect();
       gameState = MULTIPLAYER_MENU;
+    }
+  }
+  else if (gameState === MULTIPLAYER_COUNTDOWN) {
+    drawMultiplayerCountdownScreen(textShade);
+    if (millis() >= mpRaceStartMillis) {
+      startRace();
+    } else if (multiplayerLeaveRequested || keyWentDown("esc")) {
+      multiplayerLeaveRequested = false;
+      mpDisconnect();
+      gameState = MULTIPLAYER_MENU;
+    }
+  }
+  else if (gameState === MULTIPLAYER_RESULT) {
+    // Freeze the crash scene exactly as the END branch does, so the world
+    // stops behind the result panel instead of drifting on.
+    ground.velocityX = 0;
+    trex.velocityY = 0;
+    trexVY = 0;
+    obstaclesGroup.setVelocityXEach(0);
+    cloudsGroup.setVelocityXEach(0);
+    trex.changeAnimation("collided", trex_collided);
+
+    drawMultiplayerResultScreen(textShade);
+    if (multiplayerLeaveRequested || keyWentDown("esc")) {
+      multiplayerLeaveRequested = false;
+      leaveRace();
     }
   }
   else if (gameState === MULTIPLAYER_JOIN_ENTRY) {

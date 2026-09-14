@@ -196,10 +196,19 @@ wss.on("connection", function (ws) {
       room.players[1] = ws;
       ws.roomCode = joinCode;
 
+      // One seed for the room, rolled fresh per match: every race is a
+      // different random course, but both players get the same one - see the
+      // deterministic obstacle stream block in sketch.js.
       var seed = Math.floor(Math.random() * 2147483647);
-      var startAt = Date.now() + COUNTDOWN_MS;
-      send(room.players[0], { type: "start", seed: seed, startAt: startAt, room: joinCode });
-      send(room.players[1], { type: "start", seed: seed, startAt: startAt, room: joinCode });
+
+      // A countdown DURATION rather than a start timestamp. An absolute time
+      // would be on this server's clock, and the two players' device clocks
+      // can be minutes apart from it and from each other, so neither could
+      // meaningfully compare it against their own. A duration is measured
+      // against each client's own clock from the moment it arrives, leaving
+      // only one-way network latency (a few ms) as the discrepancy.
+      send(room.players[0], { type: "start", seed: seed, countdownMs: COUNTDOWN_MS, room: joinCode });
+      send(room.players[1], { type: "start", seed: seed, countdownMs: COUNTDOWN_MS, room: joinCode });
       return;
     }
 
@@ -216,6 +225,20 @@ wss.on("connection", function (ws) {
         dead: msg.dead,
         score: msg.score
       });
+      return;
+    }
+
+    // Sent once, the moment a player crashes. The live "state" relay above
+    // also carries a dead flag, but a player stops sending state once their
+    // run is over - so a dedicated message is what guarantees the opponent
+    // learns the final score rather than having to infer it from whichever
+    // state tick happened to be the last one through.
+    if (msg.type === "finished") {
+      var finishedRoom = rooms.get(ws.roomCode);
+      if (!finishedRoom) {
+        return;
+      }
+      send(opponentOf(finishedRoom, ws), { type: "opponent_finished", score: msg.score });
       return;
     }
 
