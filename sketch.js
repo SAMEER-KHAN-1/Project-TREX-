@@ -301,6 +301,83 @@ var GROUND_SURFACE_Y = 185;
 // gap would quietly become unclearable (at MAX_SPEED a single jump covers
 // ~405px, more than the old fixed 350px gap). Anchoring to jump length keeps
 // the spacing honest at every speed.
+// ---------------------------------------------------------------------------
+// Deterministic obstacle stream
+//
+// In a multiplayer race both players must run the IDENTICAL course, and the
+// server only ever sends a seed (see the "start" message in server/server.js) -
+// the course itself is generated locally on each client and never transmitted.
+// That only works if obstacle generation is a pure function of that seed,
+// which rules out p5's global random(): it is shared with the clouds and with
+// the death-shake, and the shake is rolled once per FRAME. Two machines at
+// 60Hz and 144Hz would consume a wildly different number of values, so the
+// obstacle draws would land at different points in the sequence and the two
+// courses would diverge within seconds.
+//
+// So obstacles get their own private stream, consumed by nothing else. The Nth
+// obstacle then draws the Nth set of values on both machines no matter what
+// the framerate, what the clouds did, or how long anyone spent on the menu.
+//
+// Two rules keep that guarantee, and both matter more than they look:
+//
+//   1. Every spawn draws exactly THREE values, always, even when a gate means
+//      one of them goes unused. A draw that only happens sometimes would shift
+//      every later draw on one client and desync the course permanently.
+//   2. Those gates are keyed to the obstacle INDEX, never to the score. Score
+//      accumulates in floating point at the local framerate, so it crosses any
+//      threshold at fractionally different moments on each machine - and one
+//      client taking a branch the other did not is exactly the desync that
+//      rule 1 exists to prevent.
+//
+// Single player runs the same path on a randomly chosen seed, so there is one
+// code path to reason about rather than two.
+// ---------------------------------------------------------------------------
+
+//mulberry32 - small, fast, and identical across browsers and devices because
+//every step is forced back into 32-bit integer space, leaving no float
+//rounding for two engines to disagree about
+function makeRandomStream(seed) {
+  var state = seed >>> 0;
+  return function () {
+    state = (state + 0x6d2b79f5) >>> 0;
+    var t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+var obstacleStream = makeRandomStream(1);
+//how many obstacles this run has spawned - drives the unlock gates, see rule 2
+var obstaclesSpawned = 0;
+
+function seedObstacleStream(seed) {
+  obstacleStream = makeRandomStream(seed);
+  obstaclesSpawned = 0;
+}
+
+//same (min, max) shape as p5's random(), so the call sites read the same way
+function obstacleRandom(min, max) {
+  var unit = obstacleStream();
+  if (min === undefined) {
+    return unit;
+  }
+  if (max === undefined) {
+    max = min;
+    min = 0;
+  }
+  return min + unit * (max - min);
+}
+
+// A multiplayer race must use the seed the server handed to both players; a
+// single-player run just wants a different course each time.
+function nextRunSeed() {
+  if (mpSeed !== null) {
+    return mpSeed;
+  }
+  return Math.floor(Math.random() * 2147483647);
+}
+
 var OBSTACLE_GAP_MIN_JUMPS = 1.35;
 var OBSTACLE_GAP_MAX_JUMPS = 2.8;
 var CLOUD_GAP_MIN_PX = 120;
@@ -313,11 +390,14 @@ var nextCloudGap = 0;
 //width of the obstacle just spawned, so wide cactus clusters earn extra room
 var lastObstacleWidth = 0;
 
-function rollObstacleGap() {
+//takes an already-drawn 0-1 value rather than drawing its own, so the caller
+//controls exactly where in the stream the draw happens - see rule 1 above
+function rollObstacleGap(unitRoll) {
   var airtimeFrames = 2 * Math.abs(JUMP_VELOCITY) / GRAVITY;
   var jumpDistance = airtimeFrames * currentSpeed();
-  return lastObstacleWidth +
-         jumpDistance * random(OBSTACLE_GAP_MIN_JUMPS, OBSTACLE_GAP_MAX_JUMPS);
+  var gapInJumps = OBSTACLE_GAP_MIN_JUMPS +
+                   unitRoll * (OBSTACLE_GAP_MAX_JUMPS - OBSTACLE_GAP_MIN_JUMPS);
+  return lastObstacleWidth + jumpDistance * gapInJumps;
 }
 
 function rollCloudGap() {
@@ -1029,7 +1109,9 @@ function setup() {
   lastObstacleSpawnDistance = 0;
   lastCloudSpawnDistance = 0;
   lastObstacleWidth = 0;
-  nextObstacleGap = rollObstacleGap();
+  //must precede the gap roll below - that roll comes out of this stream
+  seedObstacleStream(nextRunSeed());
+  nextObstacleGap = rollObstacleGap(obstacleRandom());
   nextCloudGap = rollCloudGap();
   nextScoreMilestone = SCORE_MILESTONE_INTERVAL;
 }
@@ -1709,15 +1791,22 @@ function buildCrowFrame(wingsUp) {
 // under it, matching Chrome dino's low pterodactyl.
 var CROW_FLIGHT_Y = 150;
 
-//score before crows are allowed to spawn at all - see the gate in spawnObstacles()
-var CROW_MIN_SCORE = 150;
+// How many obstacles must go by before crows are allowed to spawn at all, so
+// the player meets a new obstacle type with some room to react rather than
+// from the very first one - matching Chrome dino, where pterodactyls arrive
+// partway into a run. Counted in obstacles rather than score because a score
+// threshold is not reproducible across machines (see rule 2 above); obstacles
+// arrive roughly every 75 points, so this sits where the old score gate of
+// 150 did.
+var CROW_MIN_OBSTACLE_INDEX = 2;
 
-// Past this score, a spawned crow has a chance of bringing a second crow
-// close behind it at a much lower altitude - low enough it can't be ducked
-// under, so it forces a duck immediately followed by a jump instead of just
-// one reaction. Held back behind CROW_MIN_SCORE so single crows get
-// introduced first, on their own.
-var CROW_PAIR_MIN_SCORE = 400;
+// Past this point a spawned crow has a chance of bringing a second crow close
+// behind it at a much lower altitude - low enough it can't be ducked under, so
+// it forces a duck immediately followed by a jump instead of just one
+// reaction. Held back behind CROW_MIN_OBSTACLE_INDEX so single crows get
+// introduced first, on their own. In obstacles rather than score for the same
+// reproducibility reason; this is where the old score gate of 400 fell.
+var CROW_PAIR_MIN_OBSTACLE_INDEX = 5;
 var CROW_PAIR_CHANCE = 0.35;
 var CROW_PAIR_GAP_PX = 90;
 var CROW_COMPANION_FLIGHT_Y = 172;
@@ -1777,20 +1866,31 @@ function spawnObstacles() {
   if (distanceTravelled - lastObstacleSpawnDistance >= nextObstacleGap) {
     lastObstacleSpawnDistance = distanceTravelled;
 
+    // All three draws happen unconditionally, in a fixed order, before any
+    // gate below gets to decide what they mean - see rule 1 in the
+    // deterministic obstacle stream block near the top of this file.
+    var typeRoll = obstacleRandom();
+    var pairRoll = obstacleRandom();
+    var gapRoll = obstacleRandom();
+
+    var obstacleIndex = obstaclesSpawned;
+    obstaclesSpawned++;
+
     var obstacle = createSprite(600,165,10,40);
     //obstacle.debug = true;
     obstacle.baseVelocityX = -currentSpeed();
 
     // Math.round(random(1,6)) only gave types 1 and 6 half the chance of the
     // others (round maps a 0.5-wide band to each end but a full 1.0-wide band
-    // to 2-5), so the same middle cacti kept showing up. floor(random(1,9))
-    // picks all eight (six cacti + crow + boulder) evenly.
-    var rand = Math.floor(random(1,9));
-    // Crows only start showing up once the player has some room to react to
-    // a new obstacle type - matches Chrome dino, where pterodactyls are
-    // introduced partway into a run instead of from the very first obstacle.
-    if (rand === 7 && score < CROW_MIN_SCORE) {
-      rand = Math.floor(random(1,7));
+    // to 2-5), so the same middle cacti kept showing up. Flooring across the
+    // full range picks all eight (six cacti + crow + boulder) evenly.
+    var rand = 1 + Math.floor(typeRoll * 8);
+    if (rand === 7 && obstacleIndex < CROW_MIN_OBSTACLE_INDEX) {
+      // Crows aren't unlocked yet, so this spawn becomes a cactus instead.
+      // Re-uses the already-drawn pair roll - which only ever means anything
+      // for a crow, so it is going spare here - rather than drawing a fresh
+      // value, which would shift every later draw and desync the course.
+      rand = 1 + Math.floor(pairRoll * 6);
     }
     var isCrow = rand === 7;
     switch(rand) {
@@ -1842,12 +1942,12 @@ function spawnObstacles() {
     //add each obstacle to the group
     obstaclesGroup.add(obstacle);
 
-    if (isCrow && score >= CROW_PAIR_MIN_SCORE && random() < CROW_PAIR_CHANCE) {
+    if (isCrow && obstacleIndex >= CROW_PAIR_MIN_OBSTACLE_INDEX && pairRoll < CROW_PAIR_CHANCE) {
       spawnCrowCompanion(obstacle);
     }
 
     lastObstacleWidth = obstacle.width * obstacle.scale;
-    nextObstacleGap = rollObstacleGap();
+    nextObstacleGap = rollObstacleGap(gapRoll);
   }
 }
 
@@ -1891,7 +1991,10 @@ function resetGame(targetState) {
   lastObstacleSpawnDistance = 0;
   lastCloudSpawnDistance = 0;
   lastObstacleWidth = 0;
-  nextObstacleGap = rollObstacleGap();
+  //fresh course every run - and in a race, the one the server picked for both
+  //players, so the same seed deliberately regenerates the same course
+  seedObstacleStream(nextRunSeed());
+  nextObstacleGap = rollObstacleGap(obstacleRandom());
   nextCloudGap = rollCloudGap();
   nextScoreMilestone = SCORE_MILESTONE_INTERVAL;
 }
