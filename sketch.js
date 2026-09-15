@@ -594,6 +594,14 @@ var mpOpponentFinished = false;
 var mpOpponentScore = null;
 var mpOpponentLeft = false;
 
+// Live opponent position, as last reported. null means nothing has arrived
+// yet, so there is nothing to draw.
+var mpOpponentY = null;
+var mpOpponentCrouching = false;
+var mpOpponentAlive = true;
+//smoothed toward mpOpponentY every frame - see drawOpponentGhost()
+var mpGhostY = null;
+
 function mpResetRaceState() {
   mpIsRacing = false;
   mpSelfFinished = false;
@@ -601,6 +609,11 @@ function mpResetRaceState() {
   mpOpponentScore = null;
   mpOpponentLeft = false;
   mpSelfScore = 0;
+  mpOpponentY = null;
+  mpOpponentCrouching = false;
+  mpOpponentAlive = true;
+  mpGhostY = null;
+  mpLastStateSentMillis = 0;
 }
 
 function mpDisconnect() {
@@ -638,9 +651,14 @@ function mpHandleMessage(msg) {
     // player counts down over a fresh starting line - otherwise a rematch
     // would tick 3-2-1 over the previous run's crashed trex and dead cacti.
     resetGame(MULTIPLAYER_COUNTDOWN);
+  } else if (msg.type === "opponent_state") {
+    mpOpponentY = msg.y;
+    mpOpponentCrouching = !!msg.crouching;
+    mpOpponentAlive = !msg.dead;
   } else if (msg.type === "opponent_finished") {
     mpOpponentFinished = true;
     mpOpponentScore = msg.score;
+    mpOpponentAlive = false;
   } else if (msg.type === "error") {
     mpConnectionMessage = msg.message;
     mpDisconnect();
@@ -661,6 +679,37 @@ function mpHandleMessage(msg) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Live position sync
+//
+// Deliberately rate-limited rather than sent every frame: draw() runs at the
+// display's refresh rate, so a 240Hz machine would otherwise fire 240 messages
+// a second at a free-tier relay for no visible benefit. 20/sec is far below
+// what the eye can distinguish once the ghost is interpolated between updates,
+// which drawOpponentGhost() does.
+// ---------------------------------------------------------------------------
+var MP_STATE_SEND_INTERVAL_MS = 50;
+var mpLastStateSentMillis = 0;
+
+function mpSendState() {
+  if (!mpSocket || mpSocket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  var now = millis();
+  if (now - mpLastStateSentMillis < MP_STATE_SEND_INTERVAL_MS) {
+    return;
+  }
+  mpLastStateSentMillis = now;
+  mpSocket.send(JSON.stringify({
+    type: "state",
+    //rounded because a pixel of sub-pixel precision is invisible but makes
+    //every message meaningfully longer
+    y: Math.round(trex.y),
+    crouching: isCrouching,
+    dead: false
+  }));
+}
+
 // Called the moment this player crashes. The opponent may still be running,
 // so this does not decide a winner - it just reports the final score and
 // moves to the result screen, which waits for the other side.
@@ -671,6 +720,75 @@ function mpFinish(finalScore) {
     mpSocket.send(JSON.stringify({ type: "finished", score: finalScore }));
   }
   gameState = MULTIPLAYER_RESULT;
+}
+
+// ---------------------------------------------------------------------------
+// Opponent ghost
+//
+// Drawn at the SAME x as the local trex, not off to one side. Both players run
+// an identical course at an identical speed, so their world positions match -
+// which means overlaying the ghost is what makes the race readable: you can
+// see directly whether they cleared the cactus you're approaching, and whether
+// they jumped earlier or later than you. Sliding it sideways would throw that
+// relationship away and turn it into decoration.
+//
+// Tinted blue and translucent so there is never any doubt which dino is yours.
+// ---------------------------------------------------------------------------
+//populated in preload()
+var ghostRunFrames = null;
+var ghostCollidedImage = null;
+
+var GHOST_TINT = [90, 150, 255];
+var GHOST_ALPHA = 125;
+//ms per running-animation frame; wall-clock rather than draw-frame based, so
+//the ghost's legs move at the same rate on a 60Hz and a 240Hz display
+var GHOST_FRAME_MS = 110;
+// How fast the ghost catches up to the last reported position. State arrives
+// at 20/sec but draw() runs several times faster, so without this the ghost
+// would visibly step between positions instead of moving.
+var GHOST_SMOOTHING_PER_MS = 0.02;
+
+function mpShouldDrawGhost() {
+  if (mpOpponentY === null) {
+    return false;
+  }
+  //while racing, and while dead but still watching them finish
+  return mpIsRacing || (gameState === MULTIPLAYER_RESULT && !mpOpponentFinished);
+}
+
+function drawOpponentGhost(dt) {
+  if (!mpShouldDrawGhost()) {
+    return;
+  }
+
+  if (mpGhostY === null) {
+    mpGhostY = mpOpponentY;
+  } else {
+    //exponential approach, framed in real time so it converges at the same
+    //rate regardless of how often draw() happens to run
+    var catchUp = 1 - Math.pow(1 - GHOST_SMOOTHING_PER_MS, Math.max(0, dt));
+    mpGhostY += (mpOpponentY - mpGhostY) * catchUp;
+  }
+
+  var image_ = mpOpponentAlive
+    ? ghostRunFrames[Math.floor(millis() / GHOST_FRAME_MS) % ghostRunFrames.length]
+    : ghostCollidedImage;
+  if (!image_ || !image_.width) {
+    return;
+  }
+
+  var w = image_.width * trex.scale;
+  var h = image_.height * trex.scale;
+  if (mpOpponentCrouching) {
+    w *= CROUCH_WIDTH_FACTOR;
+    h *= CROUCH_HEIGHT_FACTOR;
+  }
+
+  push();
+  imageMode(CENTER);
+  tint(GHOST_TINT[0], GHOST_TINT[1], GHOST_TINT[2], GHOST_ALPHA);
+  image(image_, trex.x, mpGhostY, w, h);
+  pop();
 }
 
 function startRace() {
@@ -1195,6 +1313,15 @@ document.addEventListener("pointerdown", tryAutoFullscreen);
 function preload(){
   trex_running =   loadAnimation("trex1.png","trex3.png","trex4.png");
   trex_collided = loadAnimation("trex_collided.png");
+
+  // The opponent ghost is drawn by hand rather than as a second sprite, so it
+  // needs the frames as plain images. Sharing trex_running with a second
+  // p5.play sprite would couple the two dinos' animation state, and reading
+  // frames off the local trex would break the moment the player dies and
+  // their sprite switches to the collided animation - the opponent may well
+  // still be running at that point.
+  ghostRunFrames = [loadImage("trex1.png"), loadImage("trex3.png"), loadImage("trex4.png")];
+  ghostCollidedImage = loadImage("trex_collided.png");
 
   groundImage = loadImage("ground2.png");
 
@@ -1760,6 +1887,10 @@ function draw() {
     spawnClouds();
     spawnObstacles();
 
+    if (mpIsRacing) {
+      mpSendState();
+    }
+
     if(trexHitsAnyObstacle()){
         setCrouching(false);
         playDeathSound();
@@ -1895,6 +2026,9 @@ function draw() {
   }
 
 
+  //before drawSprites() so the player's own trex always draws on top of the
+  //ghost, never the other way round
+  drawOpponentGhost(dt);
   drawSprites();
   pop();
 
