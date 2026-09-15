@@ -2794,11 +2794,26 @@ function spawnObstacles() {
     //add each obstacle to the group
     obstaclesGroup.add(obstacle);
 
-    if (isCrow && obstacleIndex >= CROW_PAIR_MIN_OBSTACLE_INDEX && pairRoll < CROW_PAIR_CHANCE) {
+    var spawnedCrowPair = isCrow &&
+                          obstacleIndex >= CROW_PAIR_MIN_OBSTACLE_INDEX &&
+                          pairRoll < CROW_PAIR_CHANCE;
+    if (spawnedCrowPair) {
       spawnCrowCompanion(obstacle);
     }
 
     lastObstacleWidth = obstacle.width * obstacle.scale;
+
+    // A pair reaches CROW_PAIR_GAP_PX further than its lead does, but the next
+    // gap is measured from where the LEAD spawned - so without adding that
+    // reach back, the following obstacle arrived roughly 1.0 jump lengths
+    // after the companion rather than the 1.35 minimum. Under one full jump
+    // length means a player who ducked the pair correctly could land with no
+    // room left to clear whatever came next, which is the sort of death that
+    // reads as the game cheating rather than as a mistake.
+    if (spawnedCrowPair) {
+      lastObstacleWidth += CROW_PAIR_GAP_PX;
+    }
+
     nextObstacleGap = rollObstacleGap(gapRoll);
   }
 }
