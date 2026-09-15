@@ -14,7 +14,7 @@ whether they cleared the cactus you're about to hit. Highest score wins.
 
 | Action | Keyboard | Touch |
 | --- | --- | --- |
-| Jump | `Space` / `↑` / `W` | tap the top half |
+| Jump — **hold longer to jump higher** | `Space` / `↑` / `W` | tap the top half |
 | Duck (and fast-fall in mid-air) | `↓` / `S` | hold the bottom half |
 | Pause | `P` | — |
 | Mute | `M` | — |
@@ -22,6 +22,10 @@ whether they cleared the cactus you're about to hit. Highest score wins.
 | Restart after a crash | `Space` / `↑` / `W` / `Enter` | tap anywhere |
 | Rematch (after a race) | `R` | REMATCH button |
 | Back to the menu | `Esc` | MENU button |
+
+A quick tap gives a short hop that lands sooner and still clears the tallest
+cactus; holding gets you roughly twice the height and the airtime to deal with
+whatever is behind it.
 
 Things that show up as you survive longer: crows you have to **duck** rather
 than jump, low crow pairs that force a duck straight into a jump, boulders, and

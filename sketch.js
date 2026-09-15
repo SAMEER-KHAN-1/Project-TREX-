@@ -53,6 +53,22 @@ var GRAVITY = 0.8;
 // Extra downward pull for the fast-fall keys, used while airborne.
 var FAST_FALL_ACCEL = 1.6;
 
+// Variable jump height, like Chrome's dino: hold the jump key to go higher,
+// tap it for a short hop that lands sooner. Letting go while the trex is still
+// rising caps how fast it may keep climbing, cutting the arc short.
+//
+// Expressed as a CEILING on upward speed rather than a one-off multiply when
+// the key is released, because a multiply would be applied once per frame and
+// so would scale with the display: a 240Hz screen would apply it four times as
+// often as a 60Hz one and stamp the jump out almost instantly. A ceiling is
+// idempotent, so re-applying it every frame changes nothing and the same hold
+// produces the same height on any machine.
+//
+// At -9.5 against JUMP_VELOCITY's -13.5, a bare tap still clears the tallest
+// cactus with a little room, so tapping is never a death sentence - it just
+// costs the airtime that a full jump buys for whatever comes next.
+var JUMP_RELEASE_VELOCITY = -9.5;
+
 //tracked so a jump only fires on a fresh key press - see the comment where
 //this is used, in the PLAY branch of draw().
 var jumpKeyWasDown = false;
@@ -2356,14 +2372,36 @@ function draw() {
     // frames, a held key (or held touch) used to re-enter this branch and
     // re-fire the jump - and its sound - repeatedly for a single press,
     // worse the faster the frame rate.
+    // Jump takes priority over duck: a crouching trex stands up and jumps
+    // rather than the jump being refused.
+    //
+    // Refusing it (the old `&& !isCrouching`) did not merely delay the jump -
+    // it ate it. jumpKeyWasDown is assigned every frame regardless, so a press
+    // blocked by the crouch was still recorded as "already seen", and the
+    // edge-triggered test below could never fire for it again. The player had
+    // to release jump and press it a second time.
+    //
+    // That is exactly the input the crow pair asks for - duck the high crow,
+    // then immediately jump the low one - and on a phone, where releasing the
+    // duck finger and tapping with another lands on the same frame far more
+    // often than on a keyboard, it swallowed the jump most of the time.
     var jumpKeyIsDown = jumpPressed();
-    //jump takes priority over duck: a held duck key must not cancel a jump
-    if(jumpKeyIsDown && !jumpKeyWasDown && !airborne && !isCrouching) {
+    if(jumpKeyIsDown && !jumpKeyWasDown && !airborne) {
+      setCrouching(false);
       trexVY = JUMP_VELOCITY;
       jumpedThisFrame = true;
       playJumpSound();
     }
     jumpKeyWasDown = jumpKeyIsDown;
+
+    // Let go while still climbing and the ascent is capped - see
+    // JUMP_RELEASE_VELOCITY. Deliberately not gated on `airborne`, which is a
+    // position test the trex has not satisfied yet in the first frames of a
+    // jump; those early frames are exactly when a quick tap is released, so
+    // gating on it would ignore the shortest taps of all.
+    if (!jumpKeyIsDown && trexVY < JUMP_RELEASE_VELOCITY) {
+      trexVY = JUMP_RELEASE_VELOCITY;
+    }
 
     //fast-fall only makes sense while off the ground
     if(duckPressed() && airborne) {
@@ -2380,7 +2418,13 @@ function draw() {
     // penetration against the ground - so the very next frame there is
     // nothing to correct, grounded reads false, and using it here made the
     // crouch cancel itself one frame after starting.
-    if (!airborne && !jumpedThisFrame) {
+    // The trexVY test matters now that a jump can begin from a crouch. A jump
+    // takes several frames to lift the trex past the airborne threshold, and
+    // during those frames a still-held duck key would otherwise re-crouch the
+    // trex mid-ascent - which is precisely when the duck button is likely to
+    // still be down, since the player has only just let go of it to jump.
+    // While rising, neither branch applies and the crouch stays cleared.
+    if (!airborne && !jumpedThisFrame && trexVY >= 0) {
       setCrouching(duckPressed());
     } else if (airborne) {
       setCrouching(false);
