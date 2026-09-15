@@ -602,6 +602,16 @@ var mpOpponentAlive = true;
 //smoothed toward mpOpponentY every frame - see drawOpponentGhost()
 var mpGhostY = null;
 
+// The opponent's score as of their last update. Kept separate from
+// mpOpponentScore, which is the authoritative final the result screen is
+// decided on - this one is a live readout that is expected to lag slightly.
+var mpOpponentLiveScore = null;
+
+//how long "OPPONENT CRASHED" stays up after they go out, in a race you are
+//still running
+var MP_CRASH_BANNER_MS = 2500;
+var mpOpponentCrashBannerUntil = 0;
+
 function mpResetRaceState() {
   mpIsRacing = false;
   mpSelfFinished = false;
@@ -614,6 +624,8 @@ function mpResetRaceState() {
   mpOpponentAlive = true;
   mpGhostY = null;
   mpLastStateSentMillis = 0;
+  mpOpponentLiveScore = null;
+  mpOpponentCrashBannerUntil = 0;
 }
 
 function mpDisconnect() {
@@ -655,10 +667,17 @@ function mpHandleMessage(msg) {
     mpOpponentY = msg.y;
     mpOpponentCrouching = !!msg.crouching;
     mpOpponentAlive = !msg.dead;
+    mpOpponentLiveScore = msg.score;
   } else if (msg.type === "opponent_finished") {
     mpOpponentFinished = true;
     mpOpponentScore = msg.score;
+    mpOpponentLiveScore = msg.score;
     mpOpponentAlive = false;
+    //only worth announcing to a player still running - it turns their race
+    //from "stay ahead" into a concrete score to beat
+    if (mpIsRacing && !mpSelfFinished) {
+      mpOpponentCrashBannerUntil = millis() + MP_CRASH_BANNER_MS;
+    }
   } else if (msg.type === "error") {
     mpConnectionMessage = msg.message;
     mpDisconnect();
@@ -706,7 +725,8 @@ function mpSendState() {
     //every message meaningfully longer
     y: Math.round(trex.y),
     crouching: isCrouching,
-    dead: false
+    dead: false,
+    score: Math.floor(score)
   }));
 }
 
@@ -788,6 +808,80 @@ function drawOpponentGhost(dt) {
   imageMode(CENTER);
   tint(GHOST_TINT[0], GHOST_TINT[1], GHOST_TINT[2], GHOST_ALPHA);
   image(image_, trex.x, mpGhostY, w, h);
+  pop();
+}
+
+// ---------------------------------------------------------------------------
+// Race HUD
+//
+// Replaces the solo high-score line for the duration of a race. The high score
+// is not what anyone is playing for here - the number that matters is the
+// opponent's, so it takes that slot instead.
+// ---------------------------------------------------------------------------
+function inRaceView() {
+  return mpIsRacing ||
+         gameState === MULTIPLAYER_COUNTDOWN ||
+         gameState === MULTIPLAYER_RESULT;
+}
+
+function drawRaceScoreboard(textShade) {
+  push();
+  textFont('"Press Start 2P", monospace');
+  textAlign(RIGHT, TOP);
+  textSize(14);
+
+  var right = width - SCORE_MARGIN;
+  fill(textShade);
+  text("YOU  " + padScore(score), right, SCORE_MARGIN);
+
+  // Once they have crashed their score stops being a moving target and starts
+  // being a finish line, so it says so.
+  var theirScore = mpOpponentLiveScore === null ? 0 : mpOpponentLiveScore;
+  fill(GHOST_TINT[0], GHOST_TINT[1], GHOST_TINT[2]);
+  text((mpOpponentFinished ? "BEAT " : "THEM ") + padScore(theirScore), right, SCORE_MARGIN + 20);
+
+  // The gap, which is the only number either player is actually tracking.
+  // Suppressed before the opponent has reported anything, so it doesn't flash
+  // a meaningless lead during the countdown.
+  if (mpOpponentLiveScore !== null) {
+    var lead = Math.floor(score) - theirScore;
+    textSize(11);
+    if (lead > 0) {
+      fill(60, 160, 90);
+      text("+" + lead, right, SCORE_MARGIN + 40);
+    } else if (lead < 0) {
+      fill(200, 60, 60);
+      text(String(lead), right, SCORE_MARGIN + 40);
+    } else {
+      fill(textShade);
+      text("LEVEL", right, SCORE_MARGIN + 40);
+    }
+  }
+  pop();
+}
+
+function drawOpponentCrashBanner() {
+  if (millis() > mpOpponentCrashBannerUntil) {
+    return;
+  }
+  push();
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+  fill(200, 60, 60);
+  textSize(13);
+  text("OPPONENT CRASHED", GAME_WIDTH / 2, 40);
+
+  // The race is decided on score, not on who is still standing - so once they
+  // are out, a player already ahead of their final score has won outright and
+  // cannot lose it by crashing. Saying "stay alive" there would be a lie.
+  textSize(9);
+  if (Math.floor(score) > mpOpponentScore) {
+    fill(60, 160, 90);
+    text("YOU'RE AHEAD - RACE WON", GAME_WIDTH / 2, 60);
+  } else {
+    fill(60, 160, 90);
+    text("BEAT " + padScore(mpOpponentScore) + " TO WIN", GAME_WIDTH / 2, 60);
+  }
   pop();
 }
 
@@ -1790,13 +1884,17 @@ function draw() {
   // width kept changing and the whole line visibly shifted left and right
   // every time a digit changed. Every character in a monospace font has the
   // same advance width, so that can't happen here.
-  push();
-  textFont('"Press Start 2P", monospace');
-  textAlign(RIGHT, TOP);
-  textSize(16);
-  fill(textShade);
-  text("HI " + padScore(highScore) + "   " + padScore(score), width - SCORE_MARGIN, SCORE_MARGIN);
-  pop();
+  if (inRaceView()) {
+    drawRaceScoreboard(textShade);
+  } else {
+    push();
+    textFont('"Press Start 2P", monospace');
+    textAlign(RIGHT, TOP);
+    textSize(16);
+    fill(textShade);
+    text("HI " + padScore(highScore) + "   " + padScore(score), width - SCORE_MARGIN, SCORE_MARGIN);
+    pop();
+  }
 
   // Everything from here down to drawSprites() is drawn in gameplay-strip
   // coordinates (0-600 x 0-200), shifted to wherever the strip sits on screen.
@@ -1889,6 +1987,7 @@ function draw() {
 
     if (mpIsRacing) {
       mpSendState();
+      drawOpponentCrashBanner();
     }
 
     if(trexHitsAnyObstacle()){
