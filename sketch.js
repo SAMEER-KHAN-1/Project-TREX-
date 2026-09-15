@@ -596,6 +596,10 @@ var mpOpponentLeft = false;
 //the socket died mid-race, so the result can't be trusted either way
 var mpConnectionLost = false;
 
+//rematch needs both players to ask, so each side is tracked separately
+var mpRematchRequested = false;
+var mpOpponentWantsRematch = false;
+
 // Live opponent position, as last reported. null means nothing has arrived
 // yet, so there is nothing to draw.
 var mpOpponentY = null;
@@ -629,6 +633,11 @@ function mpResetRaceState() {
   mpLastStateSentMillis = 0;
   mpOpponentLiveScore = null;
   mpOpponentCrashBannerUntil = 0;
+  mpRematchRequested = false;
+  mpOpponentWantsRematch = false;
+  //cleared here too, so a tap that landed just as the next race began can't
+  //sit around and auto-accept the rematch after it
+  multiplayerRematchRequested = false;
 }
 
 function mpDisconnect() {
@@ -671,6 +680,8 @@ function mpHandleMessage(msg) {
     mpOpponentCrouching = !!msg.crouching;
     mpOpponentAlive = !msg.dead;
     mpOpponentLiveScore = msg.score;
+  } else if (msg.type === "opponent_wants_rematch") {
+    mpOpponentWantsRematch = true;
   } else if (msg.type === "opponent_finished") {
     mpOpponentFinished = true;
     mpOpponentScore = msg.score;
@@ -894,6 +905,24 @@ function drawOpponentCrashBanner() {
   pop();
 }
 
+// A rematch needs a live socket and an opponent still on the other end of it.
+// After a forfeit or a dropped connection there is nobody to play, so the
+// offer is withheld rather than shown and silently doing nothing.
+function canRematch() {
+  return !mpConnectionLost &&
+         !mpOpponentLeft &&
+         mpSocket !== null &&
+         mpSocket.readyState === WebSocket.OPEN;
+}
+
+function mpRequestRematch() {
+  if (!canRematch() || mpRematchRequested) {
+    return;
+  }
+  mpRematchRequested = true;
+  mpSocket.send(JSON.stringify({ type: "rematch" }));
+}
+
 function startRace() {
   mpResetRaceState();
   mpIsRacing = true;
@@ -989,6 +1018,10 @@ var MENU_BACK_BUTTON = { x: 300, y: 175, w: 160, h: 30 };
 var MULTIPLAYER_CREATE_BUTTON = { x: 300, y: 95, w: 240, h: 32 };
 var MULTIPLAYER_JOIN_BUTTON = { x: 300, y: 135, w: 240, h: 32 };
 var MULTIPLAYER_LEAVE_BUTTON = { x: 300, y: 172, w: 160, h: 28 };
+//the result screen offers two choices, so it gets its own side-by-side pair
+//rather than the single centered button the lobby screens use
+var RESULT_REMATCH_BUTTON = { x: 213, y: 172, w: 150, h: 28 };
+var RESULT_MENU_BUTTON = { x: 387, y: 172, w: 150, h: 28 };
 var MULTIPLAYER_JOIN_SUBMIT_BUTTON = { x: 300, y: 140, w: 160, h: 30 };
 //below the restart icon (centered at 300,140, ~32px tall) on the game-over screen
 var END_MENU_BUTTON = { x: 300, y: 180, w: 110, h: 24 };
@@ -1007,6 +1040,7 @@ var multiplayerCreateRequested = false;
 var multiplayerJoinRequested = false;
 var multiplayerJoinSubmitRequested = false;
 var multiplayerLeaveRequested = false;
+var multiplayerRematchRequested = false;
 var endMenuRequested = false;
 
 function onCanvasPointerDown(evt) {
@@ -1035,9 +1069,21 @@ function onCanvasPointerDown(evt) {
       menuBackRequested = true;
     }
   } else if (gameState === MULTIPLAYER_WAITING ||
-             gameState === MULTIPLAYER_COUNTDOWN ||
-             gameState === MULTIPLAYER_RESULT) {
+             gameState === MULTIPLAYER_COUNTDOWN) {
     if (isOverButton(MULTIPLAYER_LEAVE_BUTTON, point.x, point.y)) {
+      multiplayerLeaveRequested = true;
+    }
+  } else if (gameState === MULTIPLAYER_RESULT) {
+    // Which buttons are actually on screen depends on whether a rematch is
+    // still possible, so the hit-test has to agree with what was drawn -
+    // otherwise the centered MENU button would overlap a stale REMATCH box.
+    if (canRematch() && !mpRematchRequested) {
+      if (isOverButton(RESULT_REMATCH_BUTTON, point.x, point.y)) {
+        multiplayerRematchRequested = true;
+      } else if (isOverButton(RESULT_MENU_BUTTON, point.x, point.y)) {
+        multiplayerLeaveRequested = true;
+      }
+    } else if (isOverButton(MULTIPLAYER_LEAVE_BUTTON, point.x, point.y)) {
       multiplayerLeaveRequested = true;
     }
   } else if (gameState === MULTIPLAYER_JOIN_ENTRY) {
@@ -1234,9 +1280,29 @@ function drawMultiplayerResultScreen(textShade) {
     text("YOU " + padScore(mpSelfScore), GAME_WIDTH / 2, 82);
     text("THEM " + padScore(mpOpponentScore), GAME_WIDTH / 2, 102);
   }
+
+  // Rematch status sits just above the buttons: whether you are waiting on
+  // them, or they are waiting on you.
+  if (canRematch()) {
+    textSize(8);
+    if (mpRematchRequested && !mpOpponentWantsRematch) {
+      fill(textShade);
+      text("Waiting for opponent to accept...", GAME_WIDTH / 2, 145);
+    } else if (mpOpponentWantsRematch && !mpRematchRequested) {
+      fill(60, 160, 90);
+      text("OPPONENT WANTS A REMATCH", GAME_WIDTH / 2, 145);
+    }
+  }
   pop();
 
-  drawButton(MULTIPLAYER_LEAVE_BUTTON, "MENU");
+  if (canRematch() && !mpRematchRequested) {
+    drawButton(RESULT_REMATCH_BUTTON, "REMATCH (R)");
+    drawButton(RESULT_MENU_BUTTON, "MENU");
+  } else {
+    //nobody to rematch, or already asked - one centered button reads better
+    //than a live button sitting next to a dead one
+    drawButton(MULTIPLAYER_LEAVE_BUTTON, "MENU");
+  }
 }
 
 function drawMultiplayerJoinEntryScreen(textShade) {
@@ -2158,7 +2224,10 @@ function draw() {
     trex.changeAnimation("collided", trex_collided);
 
     drawMultiplayerResultScreen(textShade);
-    if (multiplayerLeaveRequested || keyWentDown("esc")) {
+    if (multiplayerRematchRequested || keyWentDown("r")) {
+      multiplayerRematchRequested = false;
+      mpRequestRematch();
+    } else if (multiplayerLeaveRequested || keyWentDown("esc")) {
       multiplayerLeaveRequested = false;
       leaveRace();
     }

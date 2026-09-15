@@ -24,8 +24,27 @@ const ROOM_CODE_LENGTH = 4;
 const COUNTDOWN_MS = 3000;
 const HEARTBEAT_INTERVAL_MS = 15000;
 
-// roomCode -> { players: [ws, ws|null] }
+// roomCode -> { players: [ws, ws|null], rematchReady: [bool, bool] }
 const rooms = new Map();
+
+// Starting a match and starting a rematch are the same event - a fresh seed
+// and a fresh countdown sent to both seats - so they go through one function.
+// The seed is rolled per match, so a rematch is a genuinely new course rather
+// than a replay of the one both players have just learned.
+function startMatch(room, code) {
+  room.rematchReady = [false, false];
+  var seed = Math.floor(Math.random() * 2147483647);
+
+  // A countdown DURATION rather than a start timestamp. An absolute time
+  // would be on this server's clock, and the two players' device clocks can
+  // be minutes apart from it and from each other, so neither could
+  // meaningfully compare it against their own. A duration is measured against
+  // each client's own clock from the moment it arrives, leaving only one-way
+  // network latency (a few ms) as the discrepancy.
+  var message = { type: "start", seed: seed, countdownMs: COUNTDOWN_MS, room: code };
+  send(room.players[0], message);
+  send(room.players[1], message);
+}
 
 function generateRoomCode() {
   var code;
@@ -176,7 +195,7 @@ wss.on("connection", function (ws) {
 
     if (msg.type === "create") {
       var code = generateRoomCode();
-      rooms.set(code, { players: [ws, null] });
+      rooms.set(code, { players: [ws, null], rematchReady: [false, false] });
       ws.roomCode = code;
       send(ws, { type: "created", room: code });
       return;
@@ -196,19 +215,7 @@ wss.on("connection", function (ws) {
       room.players[1] = ws;
       ws.roomCode = joinCode;
 
-      // One seed for the room, rolled fresh per match: every race is a
-      // different random course, but both players get the same one - see the
-      // deterministic obstacle stream block in sketch.js.
-      var seed = Math.floor(Math.random() * 2147483647);
-
-      // A countdown DURATION rather than a start timestamp. An absolute time
-      // would be on this server's clock, and the two players' device clocks
-      // can be minutes apart from it and from each other, so neither could
-      // meaningfully compare it against their own. A duration is measured
-      // against each client's own clock from the moment it arrives, leaving
-      // only one-way network latency (a few ms) as the discrepancy.
-      send(room.players[0], { type: "start", seed: seed, countdownMs: COUNTDOWN_MS, room: joinCode });
-      send(room.players[1], { type: "start", seed: seed, countdownMs: COUNTDOWN_MS, room: joinCode });
+      startMatch(room, joinCode);
       return;
     }
 
@@ -239,6 +246,28 @@ wss.on("connection", function (ws) {
         return;
       }
       send(opponentOf(finishedRoom, ws), { type: "opponent_finished", score: msg.score });
+      return;
+    }
+
+    // Both seats have to ask before a rematch starts - one player alone can't
+    // drag the other back into a race they haven't agreed to. Asking is
+    // relayed to the opponent either way, so a waiting player can see that
+    // the offer is on the table rather than staring at an idle screen.
+    if (msg.type === "rematch") {
+      var rematchRoom = rooms.get(ws.roomCode);
+      if (!rematchRoom) {
+        return;
+      }
+      var seat = rematchRoom.players[0] === ws ? 0 : 1;
+      if (rematchRoom.rematchReady[seat]) {
+        return; //already asked; don't re-notify on a double click
+      }
+      rematchRoom.rematchReady[seat] = true;
+      send(opponentOf(rematchRoom, ws), { type: "opponent_wants_rematch" });
+
+      if (rematchRoom.rematchReady[0] && rematchRoom.rematchReady[1]) {
+        startMatch(rematchRoom, ws.roomCode);
+      }
       return;
     }
 
