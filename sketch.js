@@ -593,6 +593,8 @@ var mpOpponentFinished = false;
 //null means the opponent quit rather than finishing a run
 var mpOpponentScore = null;
 var mpOpponentLeft = false;
+//the socket died mid-race, so the result can't be trusted either way
+var mpConnectionLost = false;
 
 // Live opponent position, as last reported. null means nothing has arrived
 // yet, so there is nothing to draw.
@@ -618,6 +620,7 @@ function mpResetRaceState() {
   mpOpponentFinished = false;
   mpOpponentScore = null;
   mpOpponentLeft = false;
+  mpConnectionLost = false;
   mpSelfScore = 0;
   mpOpponentY = null;
   mpOpponentCrouching = false;
@@ -683,10 +686,16 @@ function mpHandleMessage(msg) {
     mpDisconnect();
     gameState = MULTIPLAYER_MENU;
   } else if (msg.type === "opponent_left") {
-    if (mpIsRacing) {
-      // Mid-race, a departure is a forfeit, not an error - the player is
-      // still owed a result screen for the run they just did (or are still
-      // doing), so deliberately don't tear the session down here.
+    if (mpIsRacing && mpOpponentFinished) {
+      // They already reported a final score and have now closed the tab -
+      // which is the normal way to leave once a race is over. Their score
+      // stands. Treating this as a forfeit would wipe a legitimate result and
+      // hand an undeserved win to whoever happened to still have the page up.
+      mpOpponentLeft = false;
+    } else if (mpIsRacing) {
+      // Gone mid-run without finishing: that is a forfeit. The player is still
+      // owed a result screen for the run they are doing, so deliberately don't
+      // tear the session down here.
       mpOpponentLeft = true;
       mpOpponentFinished = true;
       mpOpponentScore = null;
@@ -888,6 +897,9 @@ function drawOpponentCrashBanner() {
 function startRace() {
   mpResetRaceState();
   mpIsRacing = true;
+  //the final, higher countdown tone - fired here rather than from the
+  //countdown screen so it lands exactly once, on the frame the race begins
+  playCountdownTick(true);
   //seeds the course from mpSeed via nextRunSeed(), and sets gameState to PLAY
   resetGame(PLAY);
 }
@@ -927,10 +939,22 @@ function mpConnect(onReady) {
     mpConnectionMessage = "Couldn't reach the multiplayer server.";
   };
   mpSocket.onclose = function () {
-    //a close that wasn't triggered by our own mpDisconnect() means the
-    //server or network dropped us - only worth reporting while a
-    //multiplayer screen is actually showing, not after leaving on purpose
-    if (gameState === MULTIPLAYER_WAITING) {
+    // A close that wasn't triggered by our own mpDisconnect() - which nulls
+    // these handlers first - means the server or the network dropped us.
+    //
+    // This has to cover a drop DURING a race, not just one on the lobby
+    // screen. Nothing about the local simulation depends on the socket, so a
+    // dead connection is invisible from inside the game: the player would keep
+    // running, alone, against an opponent frozen mid-stride, and find out only
+    // when the result never came. Free hosting tiers idle their sockets out,
+    // so this is a routine event rather than an exotic one.
+    if (mpIsRacing || gameState === MULTIPLAYER_COUNTDOWN) {
+      mpConnectionLost = true;
+      //stop the result screen waiting for a score that can no longer arrive
+      mpOpponentFinished = true;
+      mpSelfScore = Math.floor(score);
+      gameState = MULTIPLAYER_RESULT;
+    } else if (gameState === MULTIPLAYER_WAITING) {
       mpConnectionMessage = mpConnectionMessage || "Lost connection to the server.";
       gameState = MULTIPLAYER_MENU;
     }
@@ -1115,13 +1139,11 @@ function playCountdownTick(isFinal) {
 function drawMultiplayerCountdownScreen(textShade) {
   var remainingMs = mpRaceStartMillis - millis();
   var secondsLeft = Math.ceil(remainingMs / 1000);
-  var label = remainingMs > 0 ? String(secondsLeft) : "GO!";
 
-  //beep once as each number appears, and once more on GO
-  var beepKey = remainingMs > 0 ? secondsLeft : 0;
-  if (countdownSecondBeeped !== beepKey) {
-    countdownSecondBeeped = beepKey;
-    playCountdownTick(beepKey === 0);
+  //beep once as each number appears, not once per frame
+  if (countdownSecondBeeped !== secondsLeft) {
+    countdownSecondBeeped = secondsLeft;
+    playCountdownTick(false);
   }
 
   push();
@@ -1130,14 +1152,30 @@ function drawMultiplayerCountdownScreen(textShade) {
   fill(textShade);
   textSize(9);
   text("ROOM " + (mpRoomCode || "?") + "  -  SAME COURSE FOR BOTH", GAME_WIDTH / 2, 55);
-  if (remainingMs > 0) {
-    textSize(44);
-    fill(textShade);
-  } else {
-    textSize(30);
-    fill(60, 160, 90);
+  textSize(44);
+  fill(textShade);
+  text(String(secondsLeft), GAME_WIDTH / 2, 110);
+  pop();
+}
+
+// "GO!" belongs to the race, not the countdown. Drawn there it would have
+// lasted exactly one frame - the same frame the start time passed, after
+// which startRace() switches straight to PLAY - so nobody would ever have
+// seen it. Flashing it over the opening moments of the run instead keeps the
+// race beginning at precisely mpRaceStartMillis on both machines, which is
+// the one thing that must not be nudged to make room for a bit of polish.
+var MP_GO_FLASH_MS = 700;
+
+function drawRaceGoFlash() {
+  if (millis() >= mpRaceStartMillis + MP_GO_FLASH_MS) {
+    return;
   }
-  text(label, GAME_WIDTH / 2, 110);
+  push();
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+  fill(60, 160, 90);
+  textSize(30);
+  text("GO!", GAME_WIDTH / 2, 60);
   pop();
 }
 
@@ -1152,7 +1190,16 @@ function drawMultiplayerResultScreen(textShade) {
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
 
-  if (!mpOpponentFinished) {
+  if (mpConnectionLost) {
+    fill(200, 60, 60);
+    textSize(13);
+    text("CONNECTION LOST", GAME_WIDTH / 2, 50);
+    fill(textShade);
+    textSize(8);
+    text("The race could not be scored", GAME_WIDTH / 2, 76);
+    textSize(9);
+    text("YOUR SCORE " + padScore(mpSelfScore), GAME_WIDTH / 2, 100);
+  } else if (!mpOpponentFinished) {
     fill(textShade);
     textSize(12);
     text("YOU CRASHED", GAME_WIDTH / 2, 50);
@@ -1987,6 +2034,7 @@ function draw() {
 
     if (mpIsRacing) {
       mpSendState();
+      drawRaceGoFlash();
       drawOpponentCrashBanner();
     }
 
@@ -2082,13 +2130,21 @@ function draw() {
     }
   }
   else if (gameState === MULTIPLAYER_COUNTDOWN) {
-    drawMultiplayerCountdownScreen(textShade);
-    if (millis() >= mpRaceStartMillis) {
-      startRace();
-    } else if (multiplayerLeaveRequested || keyWentDown("esc")) {
+    // Leave is checked BEFORE the start time, and the countdown only draws
+    // when neither fired. Ordered the other way, a tap landing on the final
+    // countdown frame lost to the time check - the race began and left
+    // multiplayerLeaveRequested set, with nothing in PLAY to consume it. It
+    // then sat there until the player crashed, at which point the result
+    // screen read the stale flag on its very first frame and bounced straight
+    // to the menu, skipping the result entirely.
+    if (multiplayerLeaveRequested || keyWentDown("esc")) {
       multiplayerLeaveRequested = false;
       mpDisconnect();
       gameState = MULTIPLAYER_MENU;
+    } else if (millis() >= mpRaceStartMillis) {
+      startRace();
+    } else {
+      drawMultiplayerCountdownScreen(textShade);
     }
   }
   else if (gameState === MULTIPLAYER_RESULT) {
