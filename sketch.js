@@ -990,6 +990,63 @@ function mpConnect(onReady) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Shareable room links
+//
+// Typing a 4-character code into a phone is the most annoying part of getting
+// a race started, so a room is also reachable as a plain URL: the same page
+// with ?room=CODE on the end. That turns "read this out to me" into sending a
+// link over any chat app, and it costs nothing, because the server already
+// hosts the page (see the static-hosting block in server/server.js) so the
+// address the second device needs is just this page's own.
+// ---------------------------------------------------------------------------
+function roomShareUrl(code) {
+  var loc = window.location;
+  //a page opened straight off the disk has no address anyone else can reach
+  if (loc.protocol === "file:" || !loc.host) {
+    return null;
+  }
+  return loc.origin + loc.pathname + "?room=" + code;
+}
+
+function readRoomFromUrl() {
+  var match = /[?&]room=([A-Za-z0-9]{4})(?:&|$)/.exec(window.location.search);
+  return match ? match[1].toUpperCase() : null;
+}
+
+//how long the "LINK COPIED" confirmation stays up
+var SHARE_COPIED_MS = 1600;
+var shareCopiedUntilMillis = 0;
+
+function copyRoomLink(text) {
+  // The async clipboard API is only available in a secure context, and a game
+  // served over plain http to a phone on the local network is not one - which
+  // is exactly the case this feature exists for. So fall back to the old
+  // execCommand path rather than silently doing nothing on the LAN.
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(function () {
+      shareCopiedUntilMillis = millis() + SHARE_COPIED_MS;
+    }, function () {});
+    return;
+  }
+
+  var area = document.createElement("textarea");
+  area.value = text;
+  //keep it off-screen and non-scrolling, so copying doesn't visibly jump the page
+  area.style.position = "fixed";
+  area.style.top = "-1000px";
+  document.body.appendChild(area);
+  area.select();
+  try {
+    if (document.execCommand("copy")) {
+      shareCopiedUntilMillis = millis() + SHARE_COPIED_MS;
+    }
+  } catch (e) {
+    //no clipboard access at all - the link is still displayed to read off
+  }
+  document.body.removeChild(area);
+}
+
 function mpCreateRoom() {
   mpConnect(function () {
     mpSocket.send(JSON.stringify({ type: "create" }));
@@ -1018,10 +1075,12 @@ var MENU_BACK_BUTTON = { x: 300, y: 175, w: 160, h: 30 };
 var MULTIPLAYER_CREATE_BUTTON = { x: 300, y: 95, w: 240, h: 32 };
 var MULTIPLAYER_JOIN_BUTTON = { x: 300, y: 135, w: 240, h: 32 };
 var MULTIPLAYER_LEAVE_BUTTON = { x: 300, y: 172, w: 160, h: 28 };
-//the result screen offers two choices, so it gets its own side-by-side pair
-//rather than the single centered button the lobby screens use
+//screens offering two choices get a side-by-side pair rather than the single
+//centered button the simpler lobby screens use
 var RESULT_REMATCH_BUTTON = { x: 213, y: 172, w: 150, h: 28 };
 var RESULT_MENU_BUTTON = { x: 387, y: 172, w: 150, h: 28 };
+var WAITING_COPY_BUTTON = { x: 213, y: 172, w: 150, h: 28 };
+var WAITING_LEAVE_BUTTON = { x: 387, y: 172, w: 150, h: 28 };
 var MULTIPLAYER_JOIN_SUBMIT_BUTTON = { x: 300, y: 140, w: 160, h: 30 };
 //below the restart icon (centered at 300,140, ~32px tall) on the game-over screen
 var END_MENU_BUTTON = { x: 300, y: 180, w: 110, h: 24 };
@@ -1068,8 +1127,23 @@ function onCanvasPointerDown(evt) {
     } else if (isOverButton(MENU_BACK_BUTTON, point.x, point.y)) {
       menuBackRequested = true;
     }
-  } else if (gameState === MULTIPLAYER_WAITING ||
-             gameState === MULTIPLAYER_COUNTDOWN) {
+  } else if (gameState === MULTIPLAYER_WAITING) {
+    var shareUrl = mpRoomCode ? roomShareUrl(mpRoomCode) : null;
+    if (shareUrl) {
+      if (isOverButton(WAITING_COPY_BUTTON, point.x, point.y)) {
+        // Copied right here rather than via a flag consumed in draw(), the way
+        // every other button works. Clipboard writes need transient user
+        // activation, and by the time the next animation frame runs the
+        // browser no longer considers this a user gesture - so the deferred
+        // route would be refused.
+        copyRoomLink(shareUrl);
+      } else if (isOverButton(WAITING_LEAVE_BUTTON, point.x, point.y)) {
+        multiplayerLeaveRequested = true;
+      }
+    } else if (isOverButton(MULTIPLAYER_LEAVE_BUTTON, point.x, point.y)) {
+      multiplayerLeaveRequested = true;
+    }
+  } else if (gameState === MULTIPLAYER_COUNTDOWN) {
     if (isOverButton(MULTIPLAYER_LEAVE_BUTTON, point.x, point.y)) {
       multiplayerLeaveRequested = true;
     }
@@ -1152,15 +1226,32 @@ function drawMultiplayerWaitingScreen(textShade) {
     text("Connecting...", GAME_WIDTH / 2, 70);
   } else {
     textSize(9);
-    text("ROOM CODE", GAME_WIDTH / 2, 55);
+    text("ROOM CODE", GAME_WIDTH / 2, 50);
     textSize(22);
-    text(mpRoomCode, GAME_WIDTH / 2, 85);
+    text(mpRoomCode, GAME_WIDTH / 2, 78);
     textSize(9);
-    text("Waiting for opponent...", GAME_WIDTH / 2, 115);
+    text("Waiting for opponent...", GAME_WIDTH / 2, 104);
+
+    var shareUrl = roomShareUrl(mpRoomCode);
+    if (shareUrl) {
+      if (millis() < shareCopiedUntilMillis) {
+        fill(60, 160, 90);
+        textSize(9);
+        text("LINK COPIED", GAME_WIDTH / 2, 130);
+      } else {
+        textSize(7);
+        text(shareUrl, GAME_WIDTH / 2, 130);
+      }
+    }
   }
   pop();
 
-  drawButton(MULTIPLAYER_LEAVE_BUTTON, "LEAVE");
+  if (mpRoomCode && roomShareUrl(mpRoomCode)) {
+    drawButton(WAITING_COPY_BUTTON, "COPY LINK");
+    drawButton(WAITING_LEAVE_BUTTON, "LEAVE");
+  } else {
+    drawButton(MULTIPLAYER_LEAVE_BUTTON, "LEAVE");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1612,6 +1703,15 @@ function setup() {
   nextObstacleGap = rollObstacleGap(obstacleRandom());
   nextCloudGap = rollCloudGap();
   nextScoreMilestone = SCORE_MILESTONE_INTERVAL;
+
+  // Arriving on a shared ?room= link goes straight into that room rather than
+  // dropping the player on the menu to type in a code they were sent
+  // precisely so they wouldn't have to.
+  var invitedRoom = readRoomFromUrl();
+  if (invitedRoom) {
+    mpJoinRoom(invitedRoom);
+    gameState = MULTIPLAYER_WAITING;
+  }
 }
 
 // ---------------------------------------------------------------------------
