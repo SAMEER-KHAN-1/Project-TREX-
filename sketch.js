@@ -455,22 +455,56 @@ function isDuckTouchPoint(pointerEvent) {
   return point !== null && point.y > GAME_HEIGHT / 2;
 }
 
-function touchStarted(e) {
-  var touch = e && e.touches && e.touches[0];
-  // The jump/duck zone split only makes sense during actual gameplay - on
-  // the game-over screen any tap should restart, same as before the duck
-  // zone existed, instead of a tap on the bottom half being swallowed as a
-  // duck touch and silently doing nothing.
-  if (gameState === PLAY && touch && isDuckTouchPoint(touch)) {
-    touchDuckIsDown = true;
-  } else {
-    touchIsDown = true;
+// Both flags are recomputed from every finger currently on the glass, rather
+// than each event toggling one of them. Two separate bugs came from doing it
+// the other way, and both hurt most in exactly the place multi-touch matters -
+// the crow pair, which demands a duck immediately followed by a jump:
+//
+//   - A new finger was judged by e.touches[0], which is the first ACTIVE touch
+//     and not the new one. So with a finger already ducking, a second finger
+//     tapping up top was read at the DUCKING finger's position and registered
+//     as another duck. The jump never happened.
+//   - Lifting either finger cleared both flags, so releasing the jump finger
+//     silently cancelled a duck that was still being held.
+//
+// Reading the whole list makes both correct by construction, and handles
+// touchcancel (a system gesture or an incoming call) for free, since that
+// event's touches list is already missing the interrupted finger.
+function updateTouchZones(e) {
+  var jumping = false;
+  var ducking = false;
+  for (var i = 0; i < e.touches.length; i++) {
+    // The zone split only means something during gameplay - on the game-over
+    // and menu screens every tap should count as a press, rather than one on
+    // the lower half being swallowed as a duck and silently doing nothing.
+    if (gameState === PLAY && isDuckTouchPoint(e.touches[i])) {
+      ducking = true;
+    } else {
+      jumping = true;
+    }
   }
+  touchIsDown = jumping;
+  touchDuckIsDown = ducking;
 }
 
-function touchEnded() {
-  touchIsDown = false;
-  touchDuckIsDown = false;
+// A MouseEvent arrives here too: p5 routes mousePressed/mouseReleased to
+// touchStarted/touchEnded when those aren't defined, and a mouse event carries
+// no touches list. It is one pointer that can only ever mean "press".
+function touchStarted(e) {
+  if (!e || !e.touches) {
+    touchIsDown = true;
+    return;
+  }
+  updateTouchZones(e);
+}
+
+function touchEnded(e) {
+  if (!e || !e.touches) {
+    touchIsDown = false;
+    touchDuckIsDown = false;
+    return;
+  }
+  updateTouchZones(e);
 }
 
 // p5 wires touchstart/touchend to touchStarted()/touchEnded() above, but has
