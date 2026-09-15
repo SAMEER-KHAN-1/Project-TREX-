@@ -1031,21 +1031,21 @@ function drawNightOutline(img, x, y, w, h, strength) {
   pop();
 }
 
-// Deliberately reads the sprite's scale accessors rather than trex.width /
-// trex.height: those fold in the crouch stretch, so a ducking trex gets an
-// outline that matches its squashed shape instead of its standing one.
-function drawTrexNightOutline() {
-  if (!trex.animation) {
+// Deliberately reads the sprite's scale accessors rather than its width /
+// height: those fold in the crouch stretch, so a ducking trex gets an outline
+// matching its squashed shape instead of its standing one.
+function drawSpriteNightOutline(sprite, strength) {
+  if (!sprite.animation) {
     return;
   }
-  var img = trex.animation.getFrameImage();
+  var img = sprite.animation.getFrameImage();
   if (!img || !img.width) {
     return;
   }
-  drawNightOutline(img, trex.x, trex.y,
-                   img.width * Math.abs(trex._getScaleX()),
-                   img.height * Math.abs(trex._getScaleY()),
-                   nightAmount);
+  drawNightOutline(img, sprite.x, sprite.y,
+                   img.width * Math.abs(sprite._getScaleX()),
+                   img.height * Math.abs(sprite._getScaleY()),
+                   strength);
 }
 
 // The crow is the reason this exists: it is drawn darker than the sand it
@@ -1058,19 +1058,22 @@ function drawObstacleNightOutlines() {
     return;
   }
   for (var i = 0; i < obstaclesGroup.length; i++) {
-    var obstacle = obstaclesGroup[i];
-    if (!obstacle.animation) {
-      continue;
-    }
-    var img = obstacle.animation.getFrameImage();
-    if (!img || !img.width) {
-      continue;
-    }
-    drawNightOutline(img, obstacle.x, obstacle.y,
-                     img.width * Math.abs(obstacle._getScaleX()),
-                     img.height * Math.abs(obstacle._getScaleY()),
-                     nightAmount);
+    drawSpriteNightOutline(obstaclesGroup[i], nightAmount);
   }
+}
+
+// Dying at night freezes the fade wherever it was, so the Game Over screen is
+// drawn over a dark sky. The artwork measures 61 against a night sky of 24.7 -
+// a thinner margin than the trex had against the sand - so the same luminance
+// rule catches it. The restart icon is far brighter and is skipped
+// automatically, which is the point of deciding this from the art rather than
+// by naming sprites.
+function drawEndScreenNightOutlines() {
+  if (nightAmount <= 0.02 || !gameOver.visible) {
+    return;
+  }
+  drawSpriteNightOutline(gameOver, nightAmount);
+  drawSpriteNightOutline(restart, nightAmount);
 }
 
 function startRace() {
@@ -2504,7 +2507,8 @@ function draw() {
   //ghost, never the other way round
   drawOpponentGhost(dt);
   drawObstacleNightOutlines();
-  drawTrexNightOutline();
+  drawSpriteNightOutline(trex, nightAmount);
+  drawEndScreenNightOutlines();
   drawSprites();
   pop();
 
