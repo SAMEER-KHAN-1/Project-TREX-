@@ -439,15 +439,20 @@ function padScore(n) {
   return s;
 }
 
-// Bottom half of the screen counts as duck/fast-fall; everything else is a
-// jump, same as tapping anywhere used to do.
-function isDuckTouchPoint(clientX, clientY) {
-  var canvasElt = document.querySelector("canvas");
-  if (!canvasElt) {
-    return false;
-  }
-  var rect = canvasElt.getBoundingClientRect();
-  return rect.height > 0 && (clientY - rect.top) / rect.height > 0.5;
+// The lower half of the GAMEPLAY STRIP counts as duck/fast-fall; everything
+// above it - including all the sky padding - is a jump.
+//
+// Splitting on the whole screen instead, as this used to, is only equivalent
+// on a 3:1 display. Everywhere else fillScreen() makes the canvas as tall as
+// the screen's shape demands and parks the 600x200 strip low inside it (60% of
+// the spare height goes above as sky). On a portrait phone that is dramatic:
+// a 400x800 screen gives a 600x1200 canvas with the strip at y 600-800, so the
+// screen's midpoint at y=600 lands on the strip's very top edge - putting the
+// ENTIRE playfield, dino included, inside the duck zone. Tapping next to the
+// dino to jump ducked instead, and only a tap up in the empty sky jumped.
+function isDuckTouchPoint(pointerEvent) {
+  var point = canvasPointerToGame(pointerEvent);
+  return point !== null && point.y > GAME_HEIGHT / 2;
 }
 
 function touchStarted(e) {
@@ -456,7 +461,7 @@ function touchStarted(e) {
   // the game-over screen any tap should restart, same as before the duck
   // zone existed, instead of a tap on the bottom half being swallowed as a
   // duck touch and silently doing nothing.
-  if (gameState === PLAY && touch && isDuckTouchPoint(touch.clientX, touch.clientY)) {
+  if (gameState === PLAY && touch && isDuckTouchPoint(touch)) {
     touchDuckIsDown = true;
   } else {
     touchIsDown = true;
