@@ -945,14 +945,35 @@ function mpRequestRematch() {
 // ---------------------------------------------------------------------------
 var OUTLINE_DIRECTIONS = [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]];
 var NIGHT_OUTLINE_PX = 2;
-var whiteSilhouetteCache = {};
 
-function whiteSilhouette(img) {
+// Which artwork gets an outline is decided from the art itself rather than by
+// naming sprites, so it stays correct if the assets ever change. Measuring the
+// project's actual images against the night palette (sky luminance 24.7, sand
+// 56.3) shows a wide natural gap:
+//
+//   crow      40.0   drawn darker than the sand it crosses, and barely above
+//                    the night sky - effectively invisible, and it is the one
+//                    obstacle that must be ducked
+//   trex      83.9
+//   boulder   90.7
+//   ---------------- nothing lands between 91 and 138 ----------------
+//   cacti    140-149  bright green, clearly readable against night sand
+//
+// So anything below 100 is outlined and the cacti are left exactly as they
+// are, keeping the night look intact rather than rimming every sprite.
+var NIGHT_OUTLINE_LUMINANCE_MAX = 100;
+
+var nightOutlineCache = {};
+
+// Builds both the white stamp and the is-this-too-dark verdict in one pixel
+// pass, since walking the image twice for two facts about the same pixels
+// would be wasteful. Luminance is read BEFORE the pixel is overwritten white.
+function nightOutlineInfo(img) {
   //shares imageProfile()'s per-image id, so both caches key off one identity
   if (img.__profileId === undefined) {
     img.__profileId = nextProfileId++;
   }
-  var cached = whiteSilhouetteCache[img.__profileId];
+  var cached = nightOutlineCache[img.__profileId];
   if (cached) {
     return cached;
   }
@@ -961,9 +982,17 @@ function whiteSilhouette(img) {
   g.clear();
   g.image(img, 0, 0);
   g.loadPixels();
+
+  var luminanceSum = 0;
+  var visiblePixels = 0;
   //stepping by 4 walks one RGBA pixel at a time whatever the pixel density is
   for (var i = 0; i < g.pixels.length; i += 4) {
     if (g.pixels[i + 3] > 0) {
+      //Rec. 709 weighting - green carries most of perceived brightness
+      luminanceSum += 0.2126 * g.pixels[i] +
+                      0.7152 * g.pixels[i + 1] +
+                      0.0722 * g.pixels[i + 2];
+      visiblePixels++;
       g.pixels[i] = 255;
       g.pixels[i + 1] = 255;
       g.pixels[i + 2] = 255;
@@ -971,8 +1000,12 @@ function whiteSilhouette(img) {
   }
   g.updatePixels();
 
-  cached = g.get();
-  whiteSilhouetteCache[img.__profileId] = cached;
+  cached = {
+    silhouette: g.get(),
+    isDark: visiblePixels > 0 &&
+            (luminanceSum / visiblePixels) < NIGHT_OUTLINE_LUMINANCE_MAX
+  };
+  nightOutlineCache[img.__profileId] = cached;
   return cached;
 }
 
@@ -980,7 +1013,12 @@ function drawNightOutline(img, x, y, w, h, strength) {
   if (strength <= 0.02) {
     return;
   }
-  var outline = whiteSilhouette(img);
+  var info = nightOutlineInfo(img);
+  //bright artwork already reads fine against the night palette
+  if (!info.isDark) {
+    return;
+  }
+  var outline = info.silhouette;
   push();
   imageMode(CENTER);
   tint(255, 255, 255, 255 * strength);
@@ -1008,6 +1046,31 @@ function drawTrexNightOutline() {
                    img.width * Math.abs(trex._getScaleX()),
                    img.height * Math.abs(trex._getScaleY()),
                    nightAmount);
+}
+
+// The crow is the reason this exists: it is drawn darker than the sand it
+// flies over, and it is the only obstacle that has to be ducked rather than
+// jumped, so failing to see one is an unavoidable death rather than a missed
+// jump. Cacti are bright enough to be skipped automatically by the luminance
+// test in nightOutlineInfo().
+function drawObstacleNightOutlines() {
+  if (nightAmount <= 0.02) {
+    return;
+  }
+  for (var i = 0; i < obstaclesGroup.length; i++) {
+    var obstacle = obstaclesGroup[i];
+    if (!obstacle.animation) {
+      continue;
+    }
+    var img = obstacle.animation.getFrameImage();
+    if (!img || !img.width) {
+      continue;
+    }
+    drawNightOutline(img, obstacle.x, obstacle.y,
+                     img.width * Math.abs(obstacle._getScaleX()),
+                     img.height * Math.abs(obstacle._getScaleY()),
+                     nightAmount);
+  }
 }
 
 function startRace() {
@@ -2440,6 +2503,7 @@ function draw() {
   //before drawSprites() so the player's own trex always draws on top of the
   //ghost, never the other way round
   drawOpponentGhost(dt);
+  drawObstacleNightOutlines();
   drawTrexNightOutline();
   drawSprites();
   pop();
