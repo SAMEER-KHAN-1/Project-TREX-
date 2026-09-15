@@ -824,6 +824,10 @@ function drawOpponentGhost(dt) {
     h *= CROUCH_HEIGHT_FACTOR;
   }
 
+  //scaled by the ghost's own transparency, so its outline never reads as more
+  //solid than the ghost it belongs to
+  drawNightOutline(image_, trex.x, mpGhostY, w, h, nightAmount * (GHOST_ALPHA / 255));
+
   push();
   imageMode(CENTER);
   tint(GHOST_TINT[0], GHOST_TINT[1], GHOST_TINT[2], GHOST_ALPHA);
@@ -921,6 +925,89 @@ function mpRequestRematch() {
   }
   mpRematchRequested = true;
   mpSocket.send(JSON.stringify({ type: "rematch" }));
+}
+
+// ---------------------------------------------------------------------------
+// Night-time outline
+//
+// The trex artwork is near-black, and night mode paints the sky (20,24,46) and
+// the sand (60,56,48) nearly as dark - so the dino dissolved into the
+// background for the whole night stretch, which is also when the game is at
+// its fastest and least forgiving. A white outline behind the sprite keeps the
+// silhouette readable without repainting the artwork itself.
+//
+// tint() cannot do this. It MULTIPLIES the image by the given colour, so
+// tinting near-black artwork white leaves it near-black. The outline is
+// instead a pre-built copy of the frame with every non-transparent pixel
+// forced to white, stamped a couple of pixels out in eight directions behind
+// the real sprite. Built once per image and cached, since it is pure pixel
+// work that would otherwise repeat every frame.
+// ---------------------------------------------------------------------------
+var OUTLINE_DIRECTIONS = [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]];
+var NIGHT_OUTLINE_PX = 2;
+var whiteSilhouetteCache = {};
+
+function whiteSilhouette(img) {
+  //shares imageProfile()'s per-image id, so both caches key off one identity
+  if (img.__profileId === undefined) {
+    img.__profileId = nextProfileId++;
+  }
+  var cached = whiteSilhouetteCache[img.__profileId];
+  if (cached) {
+    return cached;
+  }
+
+  var g = createGraphics(img.width, img.height);
+  g.clear();
+  g.image(img, 0, 0);
+  g.loadPixels();
+  //stepping by 4 walks one RGBA pixel at a time whatever the pixel density is
+  for (var i = 0; i < g.pixels.length; i += 4) {
+    if (g.pixels[i + 3] > 0) {
+      g.pixels[i] = 255;
+      g.pixels[i + 1] = 255;
+      g.pixels[i + 2] = 255;
+    }
+  }
+  g.updatePixels();
+
+  cached = g.get();
+  whiteSilhouetteCache[img.__profileId] = cached;
+  return cached;
+}
+
+function drawNightOutline(img, x, y, w, h, strength) {
+  if (strength <= 0.02) {
+    return;
+  }
+  var outline = whiteSilhouette(img);
+  push();
+  imageMode(CENTER);
+  tint(255, 255, 255, 255 * strength);
+  for (var i = 0; i < OUTLINE_DIRECTIONS.length; i++) {
+    image(outline,
+          x + OUTLINE_DIRECTIONS[i][0] * NIGHT_OUTLINE_PX,
+          y + OUTLINE_DIRECTIONS[i][1] * NIGHT_OUTLINE_PX,
+          w, h);
+  }
+  pop();
+}
+
+// Deliberately reads the sprite's scale accessors rather than trex.width /
+// trex.height: those fold in the crouch stretch, so a ducking trex gets an
+// outline that matches its squashed shape instead of its standing one.
+function drawTrexNightOutline() {
+  if (!trex.animation) {
+    return;
+  }
+  var img = trex.animation.getFrameImage();
+  if (!img || !img.width) {
+    return;
+  }
+  drawNightOutline(img, trex.x, trex.y,
+                   img.width * Math.abs(trex._getScaleX()),
+                   img.height * Math.abs(trex._getScaleY()),
+                   nightAmount);
 }
 
 function startRace() {
@@ -2353,6 +2440,7 @@ function draw() {
   //before drawSprites() so the player's own trex always draws on top of the
   //ghost, never the other way round
   drawOpponentGhost(dt);
+  drawTrexNightOutline();
   drawSprites();
   pop();
 
