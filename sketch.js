@@ -1473,6 +1473,48 @@ var pressedButton = null;
 //set by drawButton() each frame, read after drawing to pick the CSS cursor
 var pointerIsOverButton = false;
 
+// ---------------------------------------------------------------------------
+// Overlay panel
+//
+// A dark card behind the lobby and result screens. Their text used to sit
+// straight on the world, which meant it had to be recoloured for day and night
+// and still landed on whatever happened to be behind it - a cactus, the ground
+// line, a frozen crash scene. A panel gives every one of those screens one
+// predictable dark background, so the text is a fixed set of colours that is
+// readable no matter what the game is doing underneath.
+// ---------------------------------------------------------------------------
+var OVERLAY_PANEL = { x: 300, y: 94, w: 404, h: 136 };
+
+var PANEL_TEXT = [255, 255, 255];
+var PANEL_TEXT_DIM = [162, 170, 186];
+var PANEL_GOOD = [86, 206, 130];
+var PANEL_BAD = [236, 98, 98];
+
+function drawOverlayPanel() {
+  push();
+  rectMode(CENTER);
+  noStroke();
+  fill(0, 0, 0, 90);
+  rect(OVERLAY_PANEL.x, OVERLAY_PANEL.y + 4, OVERLAY_PANEL.w, OVERLAY_PANEL.h, 12);
+  fill(20, 23, 32, 226);
+  rect(OVERLAY_PANEL.x, OVERLAY_PANEL.y, OVERLAY_PANEL.w, OVERLAY_PANEL.h, 12);
+  //hairline along the top edge, so the card reads as lit from above
+  fill(255, 255, 255, 26);
+  rect(OVERLAY_PANEL.x, OVERLAY_PANEL.y - OVERLAY_PANEL.h / 2 + 3, OVERLAY_PANEL.w - 16, 2, 1);
+  pop();
+}
+
+//every overlay screen starts from the same font and alignment
+function beginPanelText() {
+  push();
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+}
+
+function panelFill(rgb) {
+  fill(rgb[0], rgb[1], rgb[2]);
+}
+
 function buttonIsHovered(button) {
   return pointerGamePos !== null &&
          isOverButton(button, pointerGamePos.x, pointerGamePos.y);
@@ -1543,17 +1585,16 @@ function drawMenuScreen(textShade) {
   pop();
 }
 
-function drawMultiplayerMenuScreen(textShade) {
-  push();
-  textFont('"Press Start 2P", monospace');
-  textAlign(CENTER, CENTER);
-  fill(textShade);
+function drawMultiplayerMenuScreen() {
+  drawOverlayPanel();
+  beginPanelText();
+  panelFill(PANEL_TEXT);
   textSize(14);
-  text("MULTIPLAYER", GAME_WIDTH / 2, 40);
+  text("MULTIPLAYER", GAME_WIDTH / 2, 45);
   if (mpConnectionMessage) {
     textSize(8);
-    fill(200, 60, 60);
-    text(mpConnectionMessage, GAME_WIDTH / 2, 62);
+    panelFill(PANEL_BAD);
+    text(mpConnectionMessage, GAME_WIDTH / 2, 66);
   }
   pop();
 
@@ -1562,32 +1603,36 @@ function drawMultiplayerMenuScreen(textShade) {
   drawButton(MENU_BACK_BUTTON, "BACK", BUTTON_SUBTLE);
 }
 
-function drawMultiplayerWaitingScreen(textShade) {
-  push();
-  textFont('"Press Start 2P", monospace');
-  textAlign(CENTER, CENTER);
-  fill(textShade);
+function drawMultiplayerWaitingScreen() {
+  drawOverlayPanel();
+  beginPanelText();
 
   if (!mpRoomCode) {
+    panelFill(PANEL_TEXT);
     textSize(12);
-    text("Connecting...", GAME_WIDTH / 2, 70);
+    text("Connecting...", GAME_WIDTH / 2, 94);
   } else {
-    textSize(9);
-    text("ROOM CODE", GAME_WIDTH / 2, 50);
-    textSize(22);
-    text(mpRoomCode, GAME_WIDTH / 2, 78);
-    textSize(9);
-    text("Waiting for opponent...", GAME_WIDTH / 2, 104);
+    panelFill(PANEL_TEXT_DIM);
+    textSize(8);
+    text("ROOM CODE", GAME_WIDTH / 2, 48);
+    //the code is the one thing being read aloud, so it gets the space
+    panelFill(PANEL_TEXT);
+    textSize(26);
+    text(mpRoomCode, GAME_WIDTH / 2, 76);
+    panelFill(PANEL_TEXT_DIM);
+    textSize(8);
+    text("WAITING FOR OPPONENT" + waitingDots(), GAME_WIDTH / 2, 104);
 
     var shareUrl = roomShareUrl(mpRoomCode);
     if (shareUrl) {
       if (millis() < shareCopiedUntilMillis) {
-        fill(60, 160, 90);
+        panelFill(PANEL_GOOD);
         textSize(9);
-        text("LINK COPIED", GAME_WIDTH / 2, 130);
+        text("LINK COPIED", GAME_WIDTH / 2, 132);
       } else {
-        textSize(7);
-        text(shareUrl, GAME_WIDTH / 2, 130);
+        panelFill(PANEL_TEXT_DIM);
+        textSize(6);
+        text(shareUrl, GAME_WIDTH / 2, 132);
       }
     }
   }
@@ -1612,6 +1657,14 @@ function drawMultiplayerWaitingScreen(textShade) {
 //once per frame
 var countdownSecondBeeped = null;
 
+// A waiting screen with nothing moving on it reads as frozen, and the first
+// thing anyone wonders is whether it has hung. Cycling dots on a wall clock
+// (not a frame counter) shows it is alive at the same rate on any display.
+function waitingDots() {
+  var count = Math.floor(millis() / 450) % 4;
+  return "....".slice(0, count);
+}
+
 function playCountdownTick(isFinal) {
   if (isFinal) {
     playTone(880, 0.25, "square");
@@ -1620,7 +1673,7 @@ function playCountdownTick(isFinal) {
   }
 }
 
-function drawMultiplayerCountdownScreen(textShade) {
+function drawMultiplayerCountdownScreen() {
   var remainingMs = mpRaceStartMillis - millis();
   var secondsLeft = Math.ceil(remainingMs / 1000);
 
@@ -1630,15 +1683,19 @@ function drawMultiplayerCountdownScreen(textShade) {
     playCountdownTick(false);
   }
 
-  push();
-  textFont('"Press Start 2P", monospace');
-  textAlign(CENTER, CENTER);
-  fill(textShade);
-  textSize(9);
-  text("ROOM " + (mpRoomCode || "?") + "  -  SAME COURSE FOR BOTH", GAME_WIDTH / 2, 55);
-  textSize(44);
-  fill(textShade);
-  text(String(secondsLeft), GAME_WIDTH / 2, 110);
+  drawOverlayPanel();
+  beginPanelText();
+  panelFill(PANEL_TEXT_DIM);
+  textSize(7);
+  text("ROOM " + (mpRoomCode || "?") + "   -   SAME COURSE FOR BOTH", GAME_WIDTH / 2, 48);
+
+  // The number swells as its second runs out, so the rhythm is visible and not
+  // only audible - which matters on a muted phone, where the beeps are the
+  // only other cue that the race is about to start.
+  var intoSecond = 1 - ((remainingMs % 1000) / 1000);
+  panelFill(PANEL_TEXT);
+  textSize(40 + 10 * intoSecond);
+  text(String(secondsLeft), GAME_WIDTH / 2, 100);
   pop();
 }
 
@@ -1669,66 +1726,73 @@ function drawRaceGoFlash() {
 // Reached the instant this player crashes, whether or not the opponent has.
 // Until their final score arrives this is a waiting room showing your own.
 // ---------------------------------------------------------------------------
-function drawMultiplayerResultScreen(textShade) {
-  push();
-  textFont('"Press Start 2P", monospace');
-  textAlign(CENTER, CENTER);
+function drawMultiplayerResultScreen() {
+  drawOverlayPanel();
+  beginPanelText();
 
   if (mpConnectionLost) {
-    fill(200, 60, 60);
+    panelFill(PANEL_BAD);
     textSize(13);
-    text("CONNECTION LOST", GAME_WIDTH / 2, 50);
-    fill(textShade);
-    textSize(8);
-    text("The race could not be scored", GAME_WIDTH / 2, 76);
+    text("CONNECTION LOST", GAME_WIDTH / 2, 52);
+    panelFill(PANEL_TEXT_DIM);
+    textSize(7);
+    text("THE RACE COULD NOT BE SCORED", GAME_WIDTH / 2, 78);
+    panelFill(PANEL_TEXT);
     textSize(9);
-    text("YOUR SCORE " + padScore(mpSelfScore), GAME_WIDTH / 2, 100);
+    text("YOUR SCORE " + padScore(mpSelfScore), GAME_WIDTH / 2, 102);
   } else if (!mpOpponentFinished) {
-    fill(textShade);
+    panelFill(PANEL_TEXT);
     textSize(12);
-    text("YOU CRASHED", GAME_WIDTH / 2, 50);
+    text("YOU CRASHED", GAME_WIDTH / 2, 52);
     textSize(9);
-    text("SCORE " + padScore(mpSelfScore), GAME_WIDTH / 2, 75);
-    text("Waiting for opponent...", GAME_WIDTH / 2, 100);
+    text("SCORE " + padScore(mpSelfScore), GAME_WIDTH / 2, 78);
+    panelFill(PANEL_TEXT_DIM);
+    textSize(8);
+    text("WAITING FOR OPPONENT" + waitingDots(), GAME_WIDTH / 2, 104);
   } else if (mpOpponentLeft) {
-    fill(60, 160, 90);
+    panelFill(PANEL_GOOD);
     textSize(16);
     text("YOU WIN", GAME_WIDTH / 2, 55);
-    fill(textShade);
-    textSize(8);
-    text("Opponent left the race", GAME_WIDTH / 2, 82);
+    panelFill(PANEL_TEXT_DIM);
+    textSize(7);
+    text("OPPONENT LEFT THE RACE", GAME_WIDTH / 2, 82);
+    panelFill(PANEL_TEXT);
     textSize(9);
-    text("SCORE " + padScore(mpSelfScore), GAME_WIDTH / 2, 105);
+    text("SCORE " + padScore(mpSelfScore), GAME_WIDTH / 2, 106);
   } else {
     var won = mpSelfScore > mpOpponentScore;
     var tied = mpSelfScore === mpOpponentScore;
-    textSize(16);
+    textSize(17);
     if (tied) {
-      fill(textShade);
+      panelFill(PANEL_TEXT);
       text("DEAD HEAT", GAME_WIDTH / 2, 50);
     } else if (won) {
-      fill(60, 160, 90);
+      panelFill(PANEL_GOOD);
       text("YOU WIN", GAME_WIDTH / 2, 50);
     } else {
-      fill(200, 60, 60);
+      panelFill(PANEL_BAD);
       text("YOU LOSE", GAME_WIDTH / 2, 50);
     }
-    fill(textShade);
+
+    // The winning line is highlighted rather than both being the same colour,
+    // so the result is readable at a glance instead of by comparing digits.
     textSize(10);
-    text("YOU " + padScore(mpSelfScore), GAME_WIDTH / 2, 82);
+    panelFill(won || tied ? PANEL_TEXT : PANEL_TEXT_DIM);
+    text("YOU  " + padScore(mpSelfScore), GAME_WIDTH / 2, 82);
+    panelFill(!won || tied ? PANEL_TEXT : PANEL_TEXT_DIM);
     text("THEM " + padScore(mpOpponentScore), GAME_WIDTH / 2, 102);
   }
 
   // Rematch status sits just above the buttons: whether you are waiting on
   // them, or they are waiting on you.
   if (canRematch()) {
-    textSize(8);
+    textSize(7);
     if (mpRematchRequested && !mpOpponentWantsRematch) {
-      fill(textShade);
-      text("Waiting for opponent to accept...", GAME_WIDTH / 2, 145);
+      panelFill(PANEL_TEXT_DIM);
+      text("WAITING FOR THEM TO ACCEPT" + waitingDots(), GAME_WIDTH / 2, 142);
     } else if (mpOpponentWantsRematch && !mpRematchRequested) {
-      fill(60, 160, 90);
-      text("OPPONENT WANTS A REMATCH", GAME_WIDTH / 2, 145);
+      panelFill(PANEL_GOOD);
+      text("OPPONENT WANTS A REMATCH", GAME_WIDTH / 2, 142);
     }
   }
   pop();
@@ -1743,15 +1807,54 @@ function drawMultiplayerResultScreen(textShade) {
   }
 }
 
-function drawMultiplayerJoinEntryScreen(textShade) {
+// Both of these used to be drawn with whatever font and alignment happened to
+// be left over from the last thing that drew - so they came out in p5's
+// default sans-serif rather than the game's pixel font, and PAUSED was
+// centred by subtracting a hardcoded 90px rather than by actually centring.
+function drawMutedBadge(textShade) {
   push();
+  rectMode(CORNER);
+  noStroke();
+  fill(0, 0, 0, textShade === 255 ? 110 : 45);
+  rect(10, 10, 92, 20, 5);
+  textFont('"Press Start 2P", monospace');
+  textAlign(LEFT, CENTER);
+  textSize(7);
+  fill(textShade);
+  text("MUTED  (M)", 18, 21);
+  pop();
+}
+
+function drawPausedOverlay() {
+  push();
+  rectMode(CENTER);
+  noStroke();
+  //dims the frozen world so the overlay is clearly a state, not a glitch
+  fill(0, 0, 0, 120);
+  rect(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT);
+  fill(20, 23, 32, 226);
+  rect(GAME_WIDTH / 2, 100, 260, 74, 12);
+
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
-  fill(textShade);
+  panelFill(PANEL_TEXT);
+  textSize(16);
+  text("PAUSED", GAME_WIDTH / 2, 86);
+  panelFill(PANEL_TEXT_DIM);
+  textSize(7);
+  text("PRESS P TO RESUME", GAME_WIDTH / 2, 114);
+  pop();
+}
+
+function drawMultiplayerJoinEntryScreen() {
+  drawOverlayPanel();
+  beginPanelText();
+  panelFill(PANEL_TEXT);
   textSize(12);
   text("JOIN ROOM", GAME_WIDTH / 2, 45);
-  textSize(8);
-  text("ENTER 4-CHARACTER CODE", GAME_WIDTH / 2, 65);
+  panelFill(PANEL_TEXT_DIM);
+  textSize(7);
+  text("ENTER THE 4-CHARACTER CODE", GAME_WIDTH / 2, 66);
   pop();
   //the actual code entry box is the real HTML <input> positioned over the
   //canvas here - see positionRoomCodeInput()
@@ -2490,7 +2593,7 @@ function draw() {
 
   handleMuteToggle();
   if (soundMuted) {
-    text("MUTED (M)", 10, 20);
+    drawMutedBadge(textShade);
   }
   handlePauseToggle();
 
@@ -2657,8 +2760,7 @@ function draw() {
     }
   }
   else if (gameState === PAUSED) {
-    fill(textShade);
-    text("PAUSED (P to resume)", GAME_WIDTH / 2 - 90, GAME_HEIGHT / 2);
+    drawPausedOverlay();
   }
   else if (gameState === MENU) {
     drawMenuScreen(textShade);
@@ -2671,7 +2773,7 @@ function draw() {
     }
   }
   else if (gameState === MULTIPLAYER_MENU) {
-    drawMultiplayerMenuScreen(textShade);
+    drawMultiplayerMenuScreen();
     if (multiplayerCreateRequested) {
       multiplayerCreateRequested = false;
       mpCreateRoom();
@@ -2687,7 +2789,7 @@ function draw() {
     }
   }
   else if (gameState === MULTIPLAYER_WAITING) {
-    drawMultiplayerWaitingScreen(textShade);
+    drawMultiplayerWaitingScreen();
     if (multiplayerLeaveRequested || keyWentDown("esc")) {
       multiplayerLeaveRequested = false;
       mpDisconnect();
@@ -2709,7 +2811,7 @@ function draw() {
     } else if (millis() >= mpRaceStartMillis) {
       startRace();
     } else {
-      drawMultiplayerCountdownScreen(textShade);
+      drawMultiplayerCountdownScreen();
     }
   }
   else if (gameState === MULTIPLAYER_RESULT) {
@@ -2722,7 +2824,7 @@ function draw() {
     cloudsGroup.setVelocityXEach(0);
     trex.changeAnimation("collided", trex_collided);
 
-    drawMultiplayerResultScreen(textShade);
+    drawMultiplayerResultScreen();
     if (multiplayerRematchRequested || keyWentDown("r")) {
       multiplayerRematchRequested = false;
       mpRequestRematch();
@@ -2732,7 +2834,7 @@ function draw() {
     }
   }
   else if (gameState === MULTIPLAYER_JOIN_ENTRY) {
-    drawMultiplayerJoinEntryScreen(textShade);
+    drawMultiplayerJoinEntryScreen();
     if (multiplayerJoinSubmitRequested) {
       multiplayerJoinSubmitRequested = false;
       var enteredCode = roomCodeInputElt ? roomCodeInputElt.value : "";
