@@ -447,6 +447,17 @@ function saveHighScore(value) {
 //localStorage (a string) when the game ends
 var highScore = readHighScore();
 
+// Cached: this is read on every pointer move as well as on every tap, resize
+// and touch, so re-querying the DOM each time was needless work.
+var gameCanvasElt = null;
+
+function canvasElement() {
+  if (!gameCanvasElt) {
+    gameCanvasElt = document.querySelector("canvas");
+  }
+  return gameCanvasElt;
+}
+
 function padScore(n) {
   var s = String(Math.floor(n));
   while (s.length < 5) {
@@ -563,7 +574,7 @@ function restartKeyDown() {
 // in screen pixels once the canvas is scaled to fill the window - which
 // broke mousePressedOver(). Do the conversion properly ourselves.
 function canvasPointerToGame(evt) {
-  var canvasElt = document.querySelector("canvas");
+  var canvasElt = canvasElement();
   if (!canvasElt) {
     return null;
   }
@@ -1310,10 +1321,67 @@ var multiplayerLeaveRequested = false;
 var multiplayerRematchRequested = false;
 var endMenuRequested = false;
 
+//only a real mouse hovers - see the comment on pointerGamePos
+function onCanvasPointerMove(evt) {
+  if (evt.pointerType && evt.pointerType !== "mouse" && evt.pointerType !== "pen") {
+    return;
+  }
+  pointerGamePos = canvasPointerToGame(evt);
+}
+
+function onCanvasPointerLeave() {
+  pointerGamePos = null;
+}
+
+function onPointerRelease() {
+  pressedButton = null;
+}
+
+// Every button this screen is currently showing, so a press can be attributed
+// to one without each screen repeating its own hit-testing. Order matters only
+// in that no two buttons overlap on any one screen.
+function buttonsOnScreen() {
+  if (gameState === MENU) {
+    return [MENU_SINGLE_PLAYER_BUTTON, MENU_MULTIPLAYER_BUTTON];
+  }
+  if (gameState === MULTIPLAYER_MENU) {
+    return [MULTIPLAYER_CREATE_BUTTON, MULTIPLAYER_JOIN_BUTTON, MENU_BACK_BUTTON];
+  }
+  if (gameState === MULTIPLAYER_JOIN_ENTRY) {
+    return [MULTIPLAYER_JOIN_SUBMIT_BUTTON, MENU_BACK_BUTTON];
+  }
+  if (gameState === MULTIPLAYER_WAITING) {
+    return mpRoomCode && roomShareUrl(mpRoomCode)
+      ? [WAITING_COPY_BUTTON, WAITING_LEAVE_BUTTON]
+      : [MULTIPLAYER_LEAVE_BUTTON];
+  }
+  if (gameState === MULTIPLAYER_COUNTDOWN) {
+    return [MULTIPLAYER_LEAVE_BUTTON];
+  }
+  if (gameState === MULTIPLAYER_RESULT) {
+    return canRematch() && !mpRematchRequested
+      ? [RESULT_REMATCH_BUTTON, RESULT_MENU_BUTTON]
+      : [MULTIPLAYER_LEAVE_BUTTON];
+  }
+  if (gameState === END) {
+    return [END_MENU_BUTTON];
+  }
+  return [];
+}
+
 function onCanvasPointerDown(evt) {
   var point = canvasPointerToGame(evt);
   if (!point) {
     return;
+  }
+
+  //so the slab visibly sinks for as long as the pointer is held down
+  var visible = buttonsOnScreen();
+  for (var i = 0; i < visible.length; i++) {
+    if (isOverButton(visible[i], point.x, point.y)) {
+      pressedButton = visible[i];
+      break;
+    }
   }
   if (isOverRestart(point.x, point.y)) {
     restartRequested = true;
@@ -1377,17 +1445,71 @@ function onCanvasPointerDown(evt) {
   }
 }
 
-function drawButton(button, label) {
+// ---------------------------------------------------------------------------
+// Buttons
+//
+// Drawn as raised slabs that light up under the cursor and visibly depress
+// when pressed. Before this they were flat rectangles that never acknowledged
+// the pointer at all, so on a screen of several there was nothing telling you
+// which one you were about to hit, or whether a click had registered.
+//
+// PRIMARY is the action the screen exists for; SUBTLE is the way out (back,
+// leave, menu) so the two never compete for attention.
+// ---------------------------------------------------------------------------
+var BUTTON_PRIMARY = { idle: [46, 96, 184], hover: [64, 124, 224], press: [32, 70, 140] };
+var BUTTON_SUBTLE = { idle: [82, 88, 102], hover: [108, 116, 134], press: [60, 65, 78] };
+var BUTTON_POSITIVE = { idle: [42, 132, 78], hover: [58, 162, 98], press: [30, 100, 58] };
+
+//how far the slab sits above its shadow, and how far it sinks when pressed
+var BUTTON_LIFT = 3;
+
+// Pointer position in gameplay-strip coordinates, or null when the pointer is
+// elsewhere. Only ever set for a real mouse: a touchscreen has no hover, and
+// tracking taps here would leave a button stuck looking highlighted long after
+// the finger had gone.
+var pointerGamePos = null;
+//the button currently held down, so it can be drawn depressed
+var pressedButton = null;
+//set by drawButton() each frame, read after drawing to pick the CSS cursor
+var pointerIsOverButton = false;
+
+function buttonIsHovered(button) {
+  return pointerGamePos !== null &&
+         isOverButton(button, pointerGamePos.x, pointerGamePos.y);
+}
+
+function drawButton(button, label, palette) {
+  var colors = palette || BUTTON_PRIMARY;
+  var hovered = buttonIsHovered(button);
+  var pressed = pressedButton === button;
+  if (hovered) {
+    pointerIsOverButton = true;
+  }
+
+  var shade = pressed ? colors.press : (hovered ? colors.hover : colors.idle);
+  //pressing drops the slab onto its shadow, which is what sells the click
+  var slabY = button.y + (pressed ? BUTTON_LIFT : 0);
+
   push();
   rectMode(CENTER);
   noStroke();
-  fill(50, 90, 170);
-  rect(button.x, button.y, button.w, button.h, 4);
+
+  fill(0, 0, 0, 80);
+  rect(button.x, button.y + BUTTON_LIFT, button.w, button.h, 6);
+
+  fill(shade[0], shade[1], shade[2]);
+  rect(button.x, slabY, button.w, button.h, 6);
+
+  //a lighter band across the top reads as a bevel and keeps the slab from
+  //looking like a flat sticker
+  fill(255, 255, 255, pressed ? 16 : 32);
+  rect(button.x, slabY - button.h / 4, button.w - 8, button.h / 2 - 3, 4);
+
   fill(255);
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
   textSize(10);
-  text(label, button.x, button.y + 1);
+  text(label, button.x, slabY + 1);
   pop();
 }
 
@@ -1395,13 +1517,30 @@ function drawMenuScreen(textShade) {
   push();
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
-  fill(textShade);
+
+  //a soft drop shadow keeps the title legible over both the day and night sky
+  fill(0, 0, 0, 45);
   textSize(20);
-  text("T-REX RUNNER", GAME_WIDTH / 2, 60);
+  text("T-REX RUNNER", GAME_WIDTH / 2 + 2, 48 + 2);
+  fill(textShade);
+  text("T-REX RUNNER", GAME_WIDTH / 2, 48);
+
+  textSize(8);
+  fill(textShade === 255 ? 170 : 90);
+  text("RACE A FRIEND ON TWO DEVICES", GAME_WIDTH / 2, 72);
   pop();
 
   drawButton(MENU_SINGLE_PLAYER_BUTTON, "SINGLE PLAYER");
   drawButton(MENU_MULTIPLAYER_BUTTON, "MULTIPLAYER");
+
+  //the number keys already work as shortcuts; nothing said so until now
+  push();
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+  textSize(7);
+  fill(textShade === 255 ? 150 : 110);
+  text("PRESS 1 OR 2   -   F FOR FULLSCREEN", GAME_WIDTH / 2, 183);
+  pop();
 }
 
 function drawMultiplayerMenuScreen(textShade) {
@@ -1420,7 +1559,7 @@ function drawMultiplayerMenuScreen(textShade) {
 
   drawButton(MULTIPLAYER_CREATE_BUTTON, "CREATE ROOM");
   drawButton(MULTIPLAYER_JOIN_BUTTON, "JOIN ROOM");
-  drawButton(MENU_BACK_BUTTON, "BACK");
+  drawButton(MENU_BACK_BUTTON, "BACK", BUTTON_SUBTLE);
 }
 
 function drawMultiplayerWaitingScreen(textShade) {
@@ -1455,10 +1594,10 @@ function drawMultiplayerWaitingScreen(textShade) {
   pop();
 
   if (mpRoomCode && roomShareUrl(mpRoomCode)) {
-    drawButton(WAITING_COPY_BUTTON, "COPY LINK");
-    drawButton(WAITING_LEAVE_BUTTON, "LEAVE");
+    drawButton(WAITING_COPY_BUTTON, "COPY LINK", BUTTON_POSITIVE);
+    drawButton(WAITING_LEAVE_BUTTON, "LEAVE", BUTTON_SUBTLE);
   } else {
-    drawButton(MULTIPLAYER_LEAVE_BUTTON, "LEAVE");
+    drawButton(MULTIPLAYER_LEAVE_BUTTON, "LEAVE", BUTTON_SUBTLE);
   }
 }
 
@@ -1595,12 +1734,12 @@ function drawMultiplayerResultScreen(textShade) {
   pop();
 
   if (canRematch() && !mpRematchRequested) {
-    drawButton(RESULT_REMATCH_BUTTON, "REMATCH (R)");
-    drawButton(RESULT_MENU_BUTTON, "MENU");
+    drawButton(RESULT_REMATCH_BUTTON, "REMATCH (R)", BUTTON_POSITIVE);
+    drawButton(RESULT_MENU_BUTTON, "MENU", BUTTON_SUBTLE);
   } else {
     //nobody to rematch, or already asked - one centered button reads better
     //than a live button sitting next to a dead one
-    drawButton(MULTIPLAYER_LEAVE_BUTTON, "MENU");
+    drawButton(MULTIPLAYER_LEAVE_BUTTON, "MENU", BUTTON_SUBTLE);
   }
 }
 
@@ -1618,7 +1757,7 @@ function drawMultiplayerJoinEntryScreen(textShade) {
   //canvas here - see positionRoomCodeInput()
 
   drawButton(MULTIPLAYER_JOIN_SUBMIT_BUTTON, "JOIN");
-  drawButton(MENU_BACK_BUTTON, "BACK");
+  drawButton(MENU_BACK_BUTTON, "BACK", BUTTON_SUBTLE);
 }
 
 var GAME_WIDTH = 600;
@@ -1656,7 +1795,7 @@ function fillScreen() {
   if (Math.abs(cssHeight - windowHeight) <= scaleFactor + 1) {
     cssHeight = windowHeight;
   }
-  var canvasElt = document.querySelector("canvas");
+  var canvasElt = canvasElement();
   if (canvasElt) {
     canvasElt.style.width = cssWidth + "px";
     canvasElt.style.height = cssHeight + "px";
@@ -1710,7 +1849,7 @@ function createRoomCodeInput() {
 }
 
 function positionRoomCodeInput() {
-  var canvasElt = document.querySelector("canvas");
+  var canvasElt = canvasElement();
   if (!canvasElt || !roomCodeInputElt) {
     return;
   }
@@ -1849,9 +1988,15 @@ function setup() {
   fillScreen();
 
   //pointerdown covers both mouse clicks and touch taps
-  var canvasElt = document.querySelector("canvas");
+  var canvasElt = canvasElement();
   if (canvasElt) {
     canvasElt.addEventListener("pointerdown", onCanvasPointerDown);
+    canvasElt.addEventListener("pointermove", onCanvasPointerMove);
+    canvasElt.addEventListener("pointerleave", onCanvasPointerLeave);
+    //released anywhere, not just over the button, so a press can't get stuck
+    //held after the pointer wanders off and lets go somewhere else
+    window.addEventListener("pointerup", onPointerRelease);
+    window.addEventListener("pointercancel", onPointerRelease);
   }
 
   createRoomCodeInput();
@@ -2251,8 +2396,26 @@ function drawHills(groundLineY, nightAmount) {
   }
 }
 
+// Written only when it changes: assigning style.cursor every frame would dirty
+// the element's style on each of up to 240 frames a second for no reason.
+var appliedCursor = null;
+
+function applyPointerCursor() {
+  var wanted = pointerIsOverButton ? "pointer" : "default";
+  if (wanted === appliedCursor) {
+    return;
+  }
+  appliedCursor = wanted;
+  var canvasElt = canvasElement();
+  if (canvasElt) {
+    canvasElt.style.cursor = wanted;
+  }
+}
+
 function draw() {
   //trex.debug = true;
+  //recomputed from scratch each frame by whichever buttons actually draw
+  pointerIsOverButton = false;
 
   // p5.js 0.8.0 has no built-in deltaTime, so track it ourselves. dtFactor
   // is how many 60fps-reference-frames' worth of real time passed since the
@@ -2487,7 +2650,7 @@ function draw() {
     //otherwise picking Single Player was a one-way trip - there was no way
     //back to the mode-select menu (to reach Multiplayer, say) once a run
     //had ended, short of reloading the page
-    drawButton(END_MENU_BUTTON, "MENU");
+    drawButton(END_MENU_BUTTON, "MENU", BUTTON_SUBTLE);
     if (endMenuRequested || keyWentDown("esc")) {
       endMenuRequested = false;
       returnToMenu();
@@ -2596,6 +2759,7 @@ function draw() {
   pop();
 
   drawDeathFlash();
+  applyPointerCursor();
 }
 
 // Sprites are removed once they leave the screen rather than after a fixed
