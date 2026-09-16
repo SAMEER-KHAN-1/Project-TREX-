@@ -102,6 +102,7 @@ they cover, and why each exists:
 | `sharelink-test` | Room links round-trip, including over plain http on a LAN |
 | `bugfix-test` | Regressions for four fixed multiplayer bugs |
 | `forfeit-test` | An opponent who quits leaves the track, the HUD and the banner |
+| `disconnect-test` | A decided result survives a dropped socket; no rematch into an empty room |
 | `ui-test` | Button hover/press, and every overlay screen renders |
 | `resize-test` | Buttons and touch zones survive rotation and resizing |
 | `statemachine-test` | Every screen transition, plus forfeits and dropped sockets |

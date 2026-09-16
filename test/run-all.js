@@ -40,6 +40,7 @@ const UNIT = [
   "sharelink-test.js",
   "bugfix-test.js",
   "forfeit-test.js",
+  "disconnect-test.js",
   "ui-test.js",
   "resize-test.js",
   "statemachine-test.js",

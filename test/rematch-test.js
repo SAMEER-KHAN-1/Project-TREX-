@@ -63,7 +63,27 @@ const typesOf = (ws, t) => ws.seen.filter((m) => m.type === t);
   await wait(250);
   check("readiness resets between matches", typesOf(a, "start").length === 2);
 
-  a.close(); b.close();
+  // Once a player leaves, the room is gone - so a rematch request from the
+  // one still there can never be answered. This is why the client stops
+  // offering the button when the other seat empties (mpOpponentPresent):
+  // without that it sat on "WAITING FOR THEM TO ACCEPT" forever, and the most
+  // ordinary ending of all - they crash, they post their score, they close the
+  // tab - went down exactly this path.
+  b.close();
+  await wait(250);
+  check("the remaining player is told they left", typesOf(a, "opponent_left").length === 1);
+  //b already offered a rematch earlier in this run, so a's tally of those is
+  //not zero - what matters is that nothing NEW arrives
+  const startsBefore = typesOf(a, "start").length;
+  const offersBefore = typesOf(a, "opponent_wants_rematch").length;
+  sent(a, { type: "rematch" });
+  await wait(300);
+  check("a rematch into an empty room is never answered",
+    typesOf(a, "start").length === startsBefore &&
+    typesOf(a, "opponent_wants_rematch").length === offersBefore);
+  check("and the server is still alive", a.readyState === WebSocket.OPEN);
+
+  a.close();
   await wait(200);
   console.log("");
   console.log(failures === 0 ? "ALL PASS" : failures + " FAILED");

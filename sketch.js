@@ -706,6 +706,15 @@ var mpConnectionLost = false;
 var mpRematchRequested = false;
 var mpOpponentWantsRematch = false;
 
+// Whether anyone is still on the other end. Deliberately NOT the same thing as
+// mpOpponentLeft, which answers a different question - did they forfeit the
+// race - and is specifically false when they post a score and then close the
+// tab, so that their result stands. Using that one flag for both meant the
+// most ordinary ending of all (they crash, they leave) still offered a
+// rematch, and the server had already deleted the room when their socket
+// closed, so asking for one waited on a reply that could never come.
+var mpOpponentPresent = true;
+
 // Live opponent position, as last reported. null means nothing has arrived
 // yet, so there is nothing to draw.
 var mpOpponentY = null;
@@ -741,6 +750,7 @@ function mpResetRaceState() {
   mpOpponentGoneBannerUntil = 0;
   mpRematchRequested = false;
   mpOpponentWantsRematch = false;
+  mpOpponentPresent = true;
   //cleared here too, so a tap that landed just as the next race began can't
   //sit around and auto-accept the rematch after it
   multiplayerRematchRequested = false;
@@ -804,6 +814,8 @@ function mpHandleMessage(msg) {
     mpDisconnect();
     gameState = MULTIPLAYER_MENU;
   } else if (msg.type === "opponent_left") {
+    //however it ended for the race, the seat beside you is empty now
+    mpOpponentPresent = false;
     if (mpIsRacing && mpOpponentFinished) {
       // They already reported a final score and have now closed the tab -
       // which is the normal way to leave once a race is over. Their score
@@ -1055,6 +1067,7 @@ function drawOpponentGoneBanner() {
 function canRematch() {
   return !mpConnectionLost &&
          !mpOpponentLeft &&
+         mpOpponentPresent &&
          mpSocket !== null &&
          mpSocket.readyState === WebSocket.OPEN;
 }
@@ -1314,6 +1327,17 @@ function mpConnect(onReady) {
     // running, alone, against an opponent frozen mid-stride, and find out only
     // when the result never came. Free hosting tiers idle their sockets out,
     // so this is a routine event rather than an exotic one.
+    mpOpponentPresent = false;
+
+    // Both scores are already in and the result is on screen. The socket is
+    // only needed for a rematch from here, so losing it must not relabel a
+    // decided race as unscoreable - that would throw away a real result (and
+    // overwrite the scores with the frozen world's) for a connection nobody
+    // needs any more.
+    if (gameState === MULTIPLAYER_RESULT && mpOpponentFinished) {
+      return;
+    }
+
     if (mpIsRacing || gameState === MULTIPLAYER_COUNTDOWN) {
       mpConnectionLost = true;
       //stop the result screen waiting for a score that can no longer arrive
@@ -1322,6 +1346,10 @@ function mpConnect(onReady) {
       gameState = MULTIPLAYER_RESULT;
     } else if (gameState === MULTIPLAYER_WAITING) {
       mpConnectionMessage = mpConnectionMessage || "Lost connection to the server.";
+      //the socket is dead and the room went with it - tear the session down
+      //rather than leaving a closed socket and a stale room code behind for
+      //the next screen to trip over
+      mpDisconnect();
       gameState = MULTIPLAYER_MENU;
     }
   };
@@ -1919,6 +1947,12 @@ function drawMultiplayerResultScreen() {
       panelFill(PANEL_GOOD);
       text("OPPONENT WANTS A REMATCH", GAME_WIDTH / 2, 142);
     }
+  } else if (!mpConnectionLost && mpOpponentFinished) {
+    // The button is simply absent otherwise, which reads as the game having
+    // forgotten the feature rather than as there being nobody left to play.
+    panelFill(PANEL_TEXT_DIM);
+    textSize(7);
+    text("NO REMATCH - OPPONENT DISCONNECTED", GAME_WIDTH / 2, 142);
   }
   pop();
 
