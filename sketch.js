@@ -1379,6 +1379,30 @@ function readRoomFromUrl() {
   return match ? match[1].toUpperCase() : null;
 }
 
+// An invite link is single use, and not by choice: the server drops a room as
+// soon as either seat empties, so by the time anyone reloads the page, the
+// code in the address bar names a room that no longer exists. Left there, a
+// refresh - or the browser restoring the tab tomorrow - auto-joins a dead
+// room and lands on "Room not found." every time, with no way back to a
+// normal start except editing the URL by hand. So the code is taken out of
+// the address once it has been used, without adding a history entry.
+function clearRoomFromUrl() {
+  try {
+    if (!window.history || !window.history.replaceState) {
+      return;
+    }
+    var search = window.location.search.replace(/([?&])room=[A-Za-z0-9]{4}(&|$)/, "$1");
+    //tidy up whatever the removal left behind
+    search = search.replace(/[?&]$/, "");
+    if (search && search.charAt(0) !== "?") {
+      search = "?" + search;
+    }
+    window.history.replaceState(null, "", window.location.pathname + search);
+  } catch (e) {
+    //a sandboxed or file:// page may refuse; the link simply stays put
+  }
+}
+
 //how long the "LINK COPIED" confirmation stays up
 var SHARE_COPIED_MS = 1600;
 var shareCopiedUntilMillis = 0;
@@ -2426,6 +2450,7 @@ function setup() {
   if (invitedRoom) {
     mpJoinRoom(invitedRoom);
     gameState = MULTIPLAYER_WAITING;
+    clearRoomFromUrl();
   }
 }
 

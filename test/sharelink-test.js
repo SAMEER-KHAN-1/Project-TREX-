@@ -9,9 +9,9 @@ const noop = () => {};
 let failures = 0;
 function check(label, ok) { if (!ok) failures++; console.log(label.padEnd(52), ok ? "PASS" : "FAIL"); }
 
-function load(location) {
+function load(location, history) {
   const sandbox = {
-    window: { location, isSecureContext: false },
+    window: { location, isSecureContext: false, history: history },
     navigator: {},
     Math, JSON, Number, String, Array, Object, Infinity, console, RegExp,
     document: { addEventListener: noop, querySelector: () => null, createElement: () => ({ style: {}, addEventListener: noop, select: noop }), body: { appendChild: noop, removeChild: noop } },
@@ -65,6 +65,41 @@ check("generated link round-trips to its code", back.readRoomFromUrl() === "K7NP
   s.document.execCommand = () => { execCalled = true; return true; };
   s.copyRoomLink("http://192.168.29.1:8080/?room=WXYZ");
   check("plain-http copy uses execCommand fallback", execCalled);
+}
+
+// An invite link is single use - the server drops the room when a seat
+// empties - so the code has to come out of the address bar once it has been
+// used, or every later refresh auto-joins a room that is already gone.
+function replaceStateSpy() {
+  const calls = [];
+  return { calls, replaceState: (a, b, url) => calls.push(url) };
+}
+{
+  const h = replaceStateSpy();
+  const s = load({ protocol: "https:", host: "t.onrender.com", origin: "https://t.onrender.com", pathname: "/", search: "?room=AB12" }, h);
+  check("an invite code is read from the address", s.readRoomFromUrl() === "AB12");
+  s.clearRoomFromUrl();
+  check("the used code is taken out of the address", h.calls.length === 1 && h.calls[0] === "/");
+}
+{
+  //anything else in the query string has to survive
+  const h = replaceStateSpy();
+  const s = load({ protocol: "http:", host: "h:8080", origin: "http://h:8080", pathname: "/", search: "?server=ws://x:8080&room=QR34" }, h);
+  s.clearRoomFromUrl();
+  check("other query parameters are kept", h.calls[0] === "/?server=ws://x:8080");
+}
+{
+  const h = replaceStateSpy();
+  const s = load({ protocol: "http:", host: "h:8080", origin: "http://h:8080", pathname: "/", search: "?room=QR34&server=ws://x:8080" }, h);
+  s.clearRoomFromUrl();
+  check("a leading room param leaves a valid query", h.calls[0] === "/?server=ws://x:8080");
+}
+{
+  //no history API (or a page that refuses it) must not break the join
+  const s = load({ protocol: "file:", host: "", origin: "null", pathname: "/C:/game/index.html", search: "?room=AB12" }, undefined);
+  let threw = false;
+  try { s.clearRoomFromUrl(); } catch (e) { threw = true; }
+  check("a page without history support still works", threw === false);
 }
 
 console.log("");

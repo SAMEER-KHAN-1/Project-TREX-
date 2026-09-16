@@ -31,6 +31,7 @@ function reserveFreePort() {
 const UNIT = [
   "determinism-test.js",
   "spacing-test.js",
+  "playable-test.js",
   "duckjump-test.js",
   "varjump-test.js",
   "touchzone-test.js",

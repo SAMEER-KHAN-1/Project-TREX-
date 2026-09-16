@@ -43,9 +43,15 @@ ROOM**, or just opens the link — which drops them straight into the room. Both
 players then count down together and start at the same moment.
 
 If your opponent crashes first you're told their final score, so you know
-exactly what to beat. If they quit mid-run it's a forfeit. If the connection
-dies the race is declared unscored rather than left running against a ghost
-that has silently stopped moving.
+exactly what to beat. If they quit mid-run they leave the track and it's a
+forfeit. If the connection dies mid-race it's declared unscored, rather than
+left running against a ghost that has silently stopped moving — but a race
+that was already decided keeps its result, since the socket is only needed for
+a rematch by then.
+
+An invite link is single use: the room is dropped as soon as either player
+leaves, so the code is taken back out of the address bar once it has been
+used.
 
 ## Running it locally
 
@@ -81,7 +87,7 @@ Free instances sleep when idle, so the first load after a quiet spell takes
 npm test
 ```
 
-Runs from the repo root, needs no browser, and takes about fifteen seconds. The
+Runs from the repo root, needs no browser, and takes about forty seconds. The
 runner starts its own relay on a spare port for the four suites that speak
 real WebSockets, then shuts it down.
 
@@ -93,6 +99,7 @@ they cover, and why each exists:
 | --- | --- |
 | `determinism-test` | Both racers generate the identical course at 60, 144 and 240Hz |
 | `spacing-test` | No two obstacles ever arrive closer than 1.35 jump lengths |
+| `playable-test` | Every obstacle is clearable at every speed, and by how wide a margin |
 | `duckjump-test` | Jumping out of a duck works — the crow pair depends on it |
 | `varjump-test` | Hold time controls jump height, identically on any refresh rate |
 | `touchzone-test` | Jump/duck zones land on the playfield across five device shapes |
@@ -115,7 +122,27 @@ they cover, and why each exists:
 
 `test/tools/measure-art.js` prints the luminance of every sprite against the
 night palette. It is not a test — it is where the outline threshold's value
-came from, kept so the number can be re-derived rather than guessed at.
+came from, kept so the number can be re-derived rather than guessed at. It
+shares its PNG decoder with `playable-test`, which needs the real silhouettes
+because collisions follow the artwork's shape, not its bounding box.
+
+`playable-test` is the one that answers whether the game is any good to play.
+It brute-forces every input timing against every obstacle at every speed and
+reports how many frames of leeway each one leaves:
+
+```
+  obstacle                           start        fast         max
+  ----------------------------------------------------------------
+  cactus 1 (real art)                  50f         50f         36f
+  cactus 6 (real art)                  30f         38f         30f
+  boulder (box)                        46f         49f         37f
+  crow (box)                           42f         47f         34f
+  crow pair (box)                      16f         30f         34f
+```
+
+The crow pair is the tightest thing in the game at 16 frames — about a quarter
+of a second — and that is a lower bound, since the procedurally drawn crow
+stands in as a full rectangle, which is larger than the bird inside it.
 
 ## How the multiplayer works
 
