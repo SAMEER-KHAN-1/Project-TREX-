@@ -1811,6 +1811,60 @@ function drawMultiplayerResultScreen() {
 // be left over from the last thing that drew - so they came out in p5's
 // default sans-serif rather than the game's pixel font, and PAUSED was
 // centred by subtracting a hardcoded 90px rather than by actually centring.
+// ---------------------------------------------------------------------------
+// Controls hint
+//
+// Nothing in the game ever said how to play it, which matters most for exactly
+// the player who arrives from a shared link with no idea what this is.
+//
+// It clears itself the moment you jump rather than after a fixed delay: a
+// player who already knows the controls never sees it for more than an
+// instant, and one who doesn't keeps it until they have actually used it. The
+// timeout is only a backstop so it cannot sit there forever.
+// ---------------------------------------------------------------------------
+var CONTROLS_HINT_MS = 6000;
+var CONTROLS_HINT_FADE_MS = 600;
+//once per page load, not once per run - relearning is not a thing
+var playerHasJumped = false;
+var runStartedMillis = 0;
+
+function controlsHintAlpha() {
+  if (playerHasJumped) {
+    return 0;
+  }
+  var elapsed = millis() - runStartedMillis;
+  if (elapsed >= CONTROLS_HINT_MS) {
+    return 0;
+  }
+  var remaining = CONTROLS_HINT_MS - elapsed;
+  return remaining < CONTROLS_HINT_FADE_MS ? remaining / CONTROLS_HINT_FADE_MS : 1;
+}
+
+function drawControlsHint(textShade) {
+  var alpha = controlsHintAlpha();
+  if (alpha <= 0) {
+    return;
+  }
+
+  push();
+  rectMode(CENTER);
+  noStroke();
+  fill(20, 23, 32, 200 * alpha);
+  rect(GAME_WIDTH / 2, 44, 330, 44, 8);
+
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+  textSize(7);
+  // Both control schemes are named rather than guessing from the device: a
+  // touchscreen laptop is both, and guessing wrong leaves the player reading
+  // instructions for hardware they do not have.
+  fill(255, 255, 255, 255 * alpha);
+  text("SPACE / TAP TOP  -  JUMP  (HOLD TO GO HIGHER)", GAME_WIDTH / 2, 35);
+  fill(PANEL_TEXT_DIM[0], PANEL_TEXT_DIM[1], PANEL_TEXT_DIM[2], 255 * alpha);
+  text("DOWN / HOLD BOTTOM  -  DUCK", GAME_WIDTH / 2, 53);
+  pop();
+}
+
 function drawMutedBadge(textShade) {
   push();
   rectMode(CORNER);
@@ -1931,11 +1985,25 @@ function createRoomCodeInput() {
   roomCodeInputElt.style.display = "none";
   roomCodeInputElt.style.textAlign = "center";
   roomCodeInputElt.style.fontFamily = '"Press Start 2P", monospace';
-  roomCodeInputElt.style.letterSpacing = "4px";
-  roomCodeInputElt.style.border = "2px solid #32568f";
-  roomCodeInputElt.style.borderRadius = "4px";
+  roomCodeInputElt.style.letterSpacing = "6px";
   roomCodeInputElt.style.boxSizing = "border-box";
   roomCodeInputElt.style.textTransform = "uppercase";
+  // Themed to match the dark panel it now sits on - a default white field
+  // looked like a stray browser control pasted over the game.
+  roomCodeInputElt.style.background = "#0e1018";
+  roomCodeInputElt.style.color = "#ffffff";
+  roomCodeInputElt.style.caretColor = "#5c9dff";
+  roomCodeInputElt.style.border = "2px solid #3c4252";
+  roomCodeInputElt.style.borderRadius = "6px";
+  roomCodeInputElt.style.outline = "none";
+
+  //a visible focus ring, since the field is the only thing to do on that screen
+  roomCodeInputElt.addEventListener("focus", function () {
+    roomCodeInputElt.style.border = "2px solid #5c9dff";
+  });
+  roomCodeInputElt.addEventListener("blur", function () {
+    roomCodeInputElt.style.border = "2px solid #3c4252";
+  });
 
   //only letters/digits, uppercased, capped at 4 chars - matches the room
   //codes the server actually generates (see ROOM_CODE_CHARS in server.js)
@@ -2656,6 +2724,7 @@ function draw() {
       setCrouching(false);
       trexVY = JUMP_VELOCITY;
       jumpedThisFrame = true;
+      playerHasJumped = true;
       playJumpSound();
     }
     jumpKeyWasDown = jumpKeyIsDown;
@@ -2705,6 +2774,7 @@ function draw() {
       drawRaceGoFlash();
       drawOpponentCrashBanner();
     }
+    drawControlsHint(textShade);
 
     if(trexHitsAnyObstacle()){
         setCrouching(false);
@@ -3133,6 +3203,7 @@ function spawnObstacles() {
 // state the same way, they just end up in a different gameState.
 function resetGame(targetState) {
   gameState = targetState;
+  runStartedMillis = millis();
   restartRequested = false;
   gameOver.visible = false;
   restart.visible = false;
