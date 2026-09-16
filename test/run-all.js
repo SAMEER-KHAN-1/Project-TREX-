@@ -50,6 +50,7 @@ const INTEGRATION = [
   "relay-test.js",
   "race-test.js",
   "rematch-test.js",
+  "server-hardening-test.js",
 ];
 
 function waitForPort(port, timeoutMs) {
@@ -82,7 +83,7 @@ function runSuite(file) {
   const label = passed
     ? "ok   " + String(counts ? counts.length : 0).padStart(3) + " checks"
     : "FAIL";
-  console.log("  " + file.padEnd(24) + label.padEnd(16) + (ms + "ms").padStart(7));
+  console.log("  " + file.padEnd(27) + label.padEnd(16) + (ms + "ms").padStart(7));
   if (!passed) {
     console.log("");
     console.log((result.stdout || "").trimEnd());

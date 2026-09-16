@@ -24,6 +24,14 @@ const ROOM_CODE_LENGTH = 4;
 const COUNTDOWN_MS = 3000;
 const HEARTBEAT_INTERVAL_MS = 15000;
 
+// This server is reachable by anyone once deployed, so two cheap ceilings.
+// Neither is near anything real play produces: the largest message the game
+// sends is a position update well under 200 bytes, and 500 rooms is 1000
+// simultaneous players on a free instance that will fall over long before.
+// They exist so a stray script cannot exhaust memory by asking politely.
+const MAX_ROOMS = 500;
+const MAX_MESSAGE_BYTES = 4096;
+
 // roomCode -> { players: [ws, ws|null], rematchReady: [bool, bool] }
 const rooms = new Map();
 
@@ -175,11 +183,22 @@ function listLanAddresses() {
 const server = http.createServer(serveStaticFile);
 //shares the HTTP server rather than binding its own port, so the page and the
 //socket are always reachable at the same address - see the block comment above
-const wss = new WebSocketServer({ server });
+//ws would otherwise buffer up to 100MB per frame before handing it over
+const wss = new WebSocketServer({ server, maxPayload: MAX_MESSAGE_BYTES });
 
 wss.on("connection", function (ws) {
   ws.isAlive = true;
   ws.roomCode = null;
+
+  // An 'error' event with no listener IS an uncaught exception in Node, so
+  // without this the whole server dies whenever one socket misbehaves - and
+  // these are ordinary events, not exotic ones: a frame over maxPayload, a
+  // protocol violation, or simply a phone dropping off wifi mid-race and
+  // resetting the connection. One player losing signal must not disconnect
+  // everybody else. 'close' fires after this and releases the room.
+  ws.on("error", function (e) {
+    console.error("socket error:", e && e.message);
+  });
 
   ws.on("pong", function () {
     ws.isAlive = true;
@@ -193,92 +212,150 @@ wss.on("connection", function (ws) {
       return; //ignore malformed input rather than crash the connection
     }
 
-    if (msg.type === "create") {
-      var code = generateRoomCode();
-      rooms.set(code, { players: [ws, null], rematchReady: [false, false] });
-      ws.roomCode = code;
-      send(ws, { type: "created", room: code });
+    // Valid JSON is not the same as a valid message. JSON.parse happily
+    // returns null for "null", and a number, string or array for their
+    // literals - none of which have a .type. Reading .type off null threw a
+    // TypeError, and an uncaught throw inside a ws handler takes the whole
+    // PROCESS down, not just the offending connection: a four-character
+    // message disconnected every player on the server.
+    if (!msg || typeof msg !== "object" || Array.isArray(msg)) {
+      return;
+    }
+    if (typeof msg.type !== "string") {
       return;
     }
 
-    if (msg.type === "join") {
-      var joinCode = String(msg.room || "").toUpperCase();
-      var room = rooms.get(joinCode);
-      if (!room) {
-        send(ws, { type: "error", message: "Room not found." });
-        return;
-      }
-      if (room.players[1]) {
-        send(ws, { type: "error", message: "That room is already full." });
-        return;
-      }
-      room.players[1] = ws;
-      ws.roomCode = joinCode;
-
-      startMatch(room, joinCode);
-      return;
-    }
-
-    if (msg.type === "state") {
-      var stateRoom = rooms.get(ws.roomCode);
-      if (!stateRoom) {
-        return;
-      }
-      var opponent = opponentOf(stateRoom, ws);
-      send(opponent, {
-        type: "opponent_state",
-        y: msg.y,
-        crouching: msg.crouching,
-        dead: msg.dead,
-        score: msg.score
-      });
-      return;
-    }
-
-    // Sent once, the moment a player crashes. The live "state" relay above
-    // also carries a dead flag, but a player stops sending state once their
-    // run is over - so a dedicated message is what guarantees the opponent
-    // learns the final score rather than having to infer it from whichever
-    // state tick happened to be the last one through.
-    if (msg.type === "finished") {
-      var finishedRoom = rooms.get(ws.roomCode);
-      if (!finishedRoom) {
-        return;
-      }
-      send(opponentOf(finishedRoom, ws), { type: "opponent_finished", score: msg.score });
-      return;
-    }
-
-    // Both seats have to ask before a rematch starts - one player alone can't
-    // drag the other back into a race they haven't agreed to. Asking is
-    // relayed to the opponent either way, so a waiting player can see that
-    // the offer is on the table rather than staring at an idle screen.
-    if (msg.type === "rematch") {
-      var rematchRoom = rooms.get(ws.roomCode);
-      if (!rematchRoom) {
-        return;
-      }
-      var seat = rematchRoom.players[0] === ws ? 0 : 1;
-      if (rematchRoom.rematchReady[seat]) {
-        return; //already asked; don't re-notify on a double click
-      }
-      rematchRoom.rematchReady[seat] = true;
-      send(opponentOf(rematchRoom, ws), { type: "opponent_wants_rematch" });
-
-      if (rematchRoom.rematchReady[0] && rematchRoom.rematchReady[1]) {
-        startMatch(rematchRoom, ws.roomCode);
-      }
-      return;
-    }
-
-    if (msg.type === "leave") {
-      removeFromRoom(ws);
+    try {
+      handleMessage(ws, msg);
+    } catch (e) {
+      // Belt and braces for the same failure mode: whatever one client manages
+      // to send, it must cost that client its message and nobody else their
+      // game. Logged rather than swallowed silently so it can be found.
+      console.error("error handling " + msg.type + ":", e && e.message);
     }
   });
 
   ws.on("close", function () {
     removeFromRoom(ws);
   });
+});
+
+// Dispatches one already-validated message. Split out from the socket handler
+// so the caller can contain a throw to the connection that caused it.
+function handleMessage(ws, msg) {
+
+  if (msg.type === "create") {
+    // Leaving any previous room first. Without this, a second "create" on
+    // one connection simply overwrote ws.roomCode - and since a disconnect
+    // only ever cleans up the room that field currently points at, the
+    // earlier room stayed in the map for the life of the process, holding a
+    // code nobody could use. The game's own client never does this (each
+    // create opens a fresh socket), but a public endpoint should not be
+    // leakable by anything that can send two messages.
+    removeFromRoom(ws);
+
+    if (rooms.size >= MAX_ROOMS) {
+      send(ws, { type: "error", message: "Server is busy. Try again shortly." });
+      return;
+    }
+
+    var code = generateRoomCode();
+    rooms.set(code, { players: [ws, null], rematchReady: [false, false] });
+    ws.roomCode = code;
+    send(ws, { type: "created", room: code });
+    return;
+  }
+
+  if (msg.type === "join") {
+    var joinCode = String(msg.room || "").toUpperCase();
+    var room = rooms.get(joinCode);
+    if (!room) {
+      send(ws, { type: "error", message: "Room not found." });
+      return;
+    }
+    // Joining your own room would seat one socket in both chairs, making it
+    // its own opponent - every relayed message would come straight back.
+    if (room.players[0] === ws) {
+      send(ws, { type: "error", message: "That is your own room." });
+      return;
+    }
+    if (room.players[1]) {
+      send(ws, { type: "error", message: "That room is already full." });
+      return;
+    }
+    //same reasoning as "create" above: never leave an orphaned room behind
+    removeFromRoom(ws);
+    room.players[1] = ws;
+    ws.roomCode = joinCode;
+
+    startMatch(room, joinCode);
+    return;
+  }
+
+  if (msg.type === "state") {
+    var stateRoom = rooms.get(ws.roomCode);
+    if (!stateRoom) {
+      return;
+    }
+    var opponent = opponentOf(stateRoom, ws);
+    send(opponent, {
+      type: "opponent_state",
+      y: msg.y,
+      crouching: msg.crouching,
+      dead: msg.dead,
+      score: msg.score
+    });
+    return;
+  }
+
+  // Sent once, the moment a player crashes. The live "state" relay above
+  // also carries a dead flag, but a player stops sending state once their
+  // run is over - so a dedicated message is what guarantees the opponent
+  // learns the final score rather than having to infer it from whichever
+  // state tick happened to be the last one through.
+  if (msg.type === "finished") {
+    var finishedRoom = rooms.get(ws.roomCode);
+    if (!finishedRoom) {
+      return;
+    }
+    send(opponentOf(finishedRoom, ws), { type: "opponent_finished", score: msg.score });
+    return;
+  }
+
+  // Both seats have to ask before a rematch starts - one player alone can't
+  // drag the other back into a race they haven't agreed to. Asking is
+  // relayed to the opponent either way, so a waiting player can see that
+  // the offer is on the table rather than staring at an idle screen.
+  if (msg.type === "rematch") {
+    var rematchRoom = rooms.get(ws.roomCode);
+    if (!rematchRoom) {
+      return;
+    }
+    var seat = rematchRoom.players[0] === ws ? 0 : 1;
+    if (rematchRoom.rematchReady[seat]) {
+      return; //already asked; don't re-notify on a double click
+    }
+    rematchRoom.rematchReady[seat] = true;
+    send(opponentOf(rematchRoom, ws), { type: "opponent_wants_rematch" });
+
+    if (rematchRoom.rematchReady[0] && rematchRoom.rematchReady[1]) {
+      startMatch(rematchRoom, ws.roomCode);
+    }
+    return;
+  }
+
+  if (msg.type === "leave") {
+    removeFromRoom(ws);
+  }
+}
+
+//same reasoning as the per-socket handler: an unheard 'error' is fatal
+wss.on("error", function (e) {
+  console.error("websocket server error:", e && e.message);
+});
+
+server.on("error", function (e) {
+  console.error("http server error:", e && e.message);
 });
 
 //drop connections that stopped responding (closed laptop lid, dead wifi, etc.)
