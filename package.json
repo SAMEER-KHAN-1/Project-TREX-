@@ -1,0 +1,13 @@
+{
+  "name": "project-trex",
+  "version": "1.0.0",
+  "description": "T-Rex runner with a two-player network race",
+  "private": true,
+  "scripts": {
+    "test": "node test/run-all.js",
+    "start": "node server/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

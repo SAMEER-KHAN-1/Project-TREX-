@@ -75,6 +75,42 @@ WebSocket address from whatever URL the page was loaded from.
 Free instances sleep when idle, so the first load after a quiet spell takes
 30–60 seconds, and an idle socket may be dropped mid-race.
 
+## Tests
+
+```bash
+npm test
+```
+
+Runs from the repo root, needs no browser, and takes about fifteen seconds. The
+runner starts its own relay on a spare port for the three suites that speak
+real WebSockets, then shuts it down.
+
+The game is one big p5 sketch, so the suites load `sketch.js` into a stubbed p5
+and drive the real `draw()` loop rather than testing copies of the logic. What
+they cover, and why each exists:
+
+| Suite | Guards |
+| --- | --- |
+| `determinism-test` | Both racers generate the identical course at 60, 144 and 240Hz |
+| `spacing-test` | No two obstacles ever arrive closer than 1.35 jump lengths |
+| `duckjump-test` | Jumping out of a duck works — the crow pair depends on it |
+| `varjump-test` | Hold time controls jump height, identically on any refresh rate |
+| `touchzone-test` | Jump/duck zones land on the playfield across five device shapes |
+| `multitouch-test` | Two fingers duck and jump independently |
+| `outline-test` | Dark sprites get a night outline; bright ones are left alone |
+| `ghost-test` | The opponent ghost interpolates and crouches correctly |
+| `sharelink-test` | Room links round-trip, including over plain http on a LAN |
+| `bugfix-test` | Regressions for four fixed multiplayer bugs |
+| `ui-test` | Button hover/press, and every overlay screen renders |
+| `resize-test` | Buttons and touch zones survive rotation and resizing |
+| `statemachine-test` | Every screen transition, plus forfeits and dropped sockets |
+| `monkey-test` | 100,000 frames of random input — no crash, wedge, NaN or leak |
+| `relay/race/rematch-test` | The wire protocol, against a real server |
+
+`test/tools/measure-art.js` prints the luminance of every sprite against the
+night palette. It is not a test — it is where the outline threshold's value
+came from, kept so the number can be re-derived rather than guessed at.
+
 ## How the multiplayer works
 
 The server is a **relay, not an authority**. It hands out room codes, issues one
