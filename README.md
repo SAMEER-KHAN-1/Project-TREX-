@@ -82,7 +82,7 @@ npm test
 ```
 
 Runs from the repo root, needs no browser, and takes about fifteen seconds. The
-runner starts its own relay on a spare port for the three suites that speak
+runner starts its own relay on a spare port for the four suites that speak
 real WebSockets, then shuts it down.
 
 The game is one big p5 sketch, so the suites load `sketch.js` into a stubbed p5
@@ -104,8 +104,11 @@ they cover, and why each exists:
 | `ui-test` | Button hover/press, and every overlay screen renders |
 | `resize-test` | Buttons and touch zones survive rotation and resizing |
 | `statemachine-test` | Every screen transition, plus forfeits and dropped sockets |
+| `highscore-test` | A new best survives closing the tab, without writing every frame |
+| `connect-test` | A sleeping server explains itself, then gives up rather than hanging |
 | `monkey-test` | 100,000 frames of random input — no crash, wedge, NaN or leak |
 | `relay/race/rematch-test` | The wire protocol, against a real server |
+| `server-hardening-test` | Junk frames, oversized frames and room hoarding |
 
 `test/tools/measure-art.js` prints the luminance of every sprite against the
 night palette. It is not a test — it is where the outline threshold's value

@@ -447,6 +447,46 @@ function saveHighScore(value) {
 //localStorage (a string) when the game ends
 var highScore = readHighScore();
 
+// What's actually in storage right now. The live highScore is beaten - and
+// so becomes worth saving - on a single frame somewhere mid-run, but writing
+// it there would mean a localStorage write on every frame of every run past
+// the old best, at up to 1000 frames a second. Tracking what has already
+// been written lets persistHighScore() be called freely from anywhere: it is
+// a no-op unless there is genuinely something new to store.
+var savedHighScore = highScore;
+
+function persistHighScore() {
+  if (highScore <= savedHighScore) {
+    return;
+  }
+  saveHighScore(highScore);
+  savedHighScore = highScore;
+}
+
+// Beating your best and then simply closing the tab used to lose it. The only
+// save was in resetGame(), so the score survived only if the player pressed
+// restart or went back to the menu afterwards - quitting from the game-over
+// screen, or from the result screen after a race, threw the record away.
+//
+// Both events are needed, and neither is beforeunload:
+//   visibilitychange - fires when a phone is locked or the app is switched
+//     away from, which on mobile is very often the last event a page ever
+//     gets; the tab may be discarded without ever coming back.
+//   pagehide - covers the desktop close/navigate case, and unlike unload it
+//     still fires for a page restored from the back-forward cache.
+// Both can fire for one departure, which costs nothing: the second call finds
+// nothing new to write.
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") {
+      persistHighScore();
+    }
+  });
+}
+if (typeof window !== "undefined" && window.addEventListener) {
+  window.addEventListener("pagehide", persistHighScore);
+}
+
 // Cached: this is read on every pointer move as well as on every tap, resize
 // and touch, so re-querying the DOM each time was needless work.
 var gameCanvasElt = null;
@@ -2832,6 +2872,9 @@ function draw() {
         setCrouching(false);
         playDeathSound();
         deathEffectStartMillis = millis();
+        //the run is over and the score is final - bank it here rather than
+        //waiting to see whether the player ever presses restart
+        persistHighScore();
         //a race crash goes to the result screen instead of Game Over: there is
         //no restarting mid-race, and the opponent may still be running
         if (mpIsRacing) {
@@ -3281,8 +3324,10 @@ function resetGame(targetState) {
 
   //highScore is already kept live (updated the instant it's beaten, in
   //draw()), so just persist it - no need to re-derive it from the score
-  //this run ended with, or compare against the stringified localStorage value
-  saveHighScore(highScore);
+  //this run ended with, or compare against the stringified localStorage value.
+  //Usually already written by the death handler; this catches the runs that
+  //end without one, such as leaving a race the opponent won.
+  persistHighScore();
 
   score = 0;
   //a new run starts in daylight straight away, not with a 3s fade out of night
