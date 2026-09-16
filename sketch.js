@@ -724,6 +724,7 @@ function mpDisconnect() {
   //must be cleared, or the next single-player run would keep replaying the
   //race's course - nextRunSeed() prefers mpSeed whenever it is set
   mpSeed = null;
+  mpSocketOpen = false;
   mpResetRaceState();
 }
 
@@ -1160,8 +1161,51 @@ function leaveRace() {
 
 //onReady fires once the socket is actually open, since sending before then
 //silently fails
+// ---------------------------------------------------------------------------
+// Connection timing
+//
+// Free hosting tiers sleep after a spell with no traffic and take the better
+// part of a minute to wake. A browser gives no progress for an opening
+// WebSocket, so the lobby simply read "Connecting..." for up to a minute with
+// no way to tell a waking server from a broken one - and the natural
+// conclusion is that the game is broken.
+//
+// So: say something once the wait stops looking instant, and give up
+// eventually rather than hanging forever.
+// ---------------------------------------------------------------------------
+var MP_CONNECT_SLOW_MS = 3500;
+var MP_CONNECT_TIMEOUT_MS = 60000;
+var mpConnectStartedMillis = 0;
+var mpSocketOpen = false;
+
+//null when there is nothing worth saying yet
+function mpConnectingNote() {
+  if (mpSocketOpen || !mpSocket) {
+    return null;
+  }
+  if (millis() - mpConnectStartedMillis < MP_CONNECT_SLOW_MS) {
+    return null;
+  }
+  return "THE SERVER MAY BE WAKING UP";
+}
+
+//gives up on a connection that never opened, so the lobby cannot hang forever
+function mpCheckConnectTimeout() {
+  if (mpSocketOpen || !mpSocket) {
+    return;
+  }
+  if (millis() - mpConnectStartedMillis < MP_CONNECT_TIMEOUT_MS) {
+    return;
+  }
+  mpConnectionMessage = "Couldn't reach the server. Try again.";
+  mpDisconnect();
+  gameState = MULTIPLAYER_MENU;
+}
+
 function mpConnect(onReady) {
   mpConnectionMessage = null;
+  mpConnectStartedMillis = millis();
+  mpSocketOpen = false;
   try {
     mpSocket = new WebSocket(resolveServerUrl());
   } catch (e) {
@@ -1170,6 +1214,7 @@ function mpConnect(onReady) {
   }
 
   mpSocket.onopen = function () {
+    mpSocketOpen = true;
     if (onReady) {
       onReady();
     }
@@ -1610,7 +1655,14 @@ function drawMultiplayerWaitingScreen() {
   if (!mpRoomCode) {
     panelFill(PANEL_TEXT);
     textSize(12);
-    text("Connecting...", GAME_WIDTH / 2, 94);
+    text("CONNECTING" + waitingDots(), GAME_WIDTH / 2, 86);
+    var note = mpConnectingNote();
+    if (note) {
+      panelFill(PANEL_TEXT_DIM);
+      textSize(7);
+      text(note, GAME_WIDTH / 2, 110);
+      text("THIS CAN TAKE UP TO A MINUTE", GAME_WIDTH / 2, 124);
+    }
   } else {
     panelFill(PANEL_TEXT_DIM);
     textSize(8);
@@ -2860,6 +2912,7 @@ function draw() {
   }
   else if (gameState === MULTIPLAYER_WAITING) {
     drawMultiplayerWaitingScreen();
+    mpCheckConnectTimeout();
     if (multiplayerLeaveRequested || keyWentDown("esc")) {
       multiplayerLeaveRequested = false;
       mpDisconnect();
