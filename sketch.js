@@ -1546,6 +1546,13 @@ function onCanvasPointerDown(evt) {
       multiplayerCreateRequested = true;
     } else if (isOverButton(MULTIPLAYER_JOIN_BUTTON, point.x, point.y)) {
       multiplayerJoinRequested = true;
+      // Shown here as well as from draw(), for the same reason the clipboard
+      // write below happens inline: a mobile browser only opens its on-screen
+      // keyboard for a focus() that happens inside the tap that asked for it.
+      // Deferred to the next animation frame, the field appeared with nothing
+      // to type into it, and a phone player had to work out for themselves
+      // that tapping the field again was what opened the keyboard.
+      showRoomCodeInput();
     } else if (isOverButton(MENU_BACK_BUTTON, point.x, point.y)) {
       menuBackRequested = true;
     }
@@ -2133,6 +2140,9 @@ function windowResized() {
 // ---------------------------------------------------------------------------
 var roomCodeInputElt = null;
 
+//below this, iOS zooms the page on focus - see positionRoomCodeInput()
+var MIN_INPUT_FONT_PX = 16;
+
 function createRoomCodeInput() {
   roomCodeInputElt = document.createElement("input");
   roomCodeInputElt.type = "text";
@@ -2144,7 +2154,6 @@ function createRoomCodeInput() {
   roomCodeInputElt.style.display = "none";
   roomCodeInputElt.style.textAlign = "center";
   roomCodeInputElt.style.fontFamily = '"Press Start 2P", monospace';
-  roomCodeInputElt.style.letterSpacing = "6px";
   roomCodeInputElt.style.boxSizing = "border-box";
   roomCodeInputElt.style.textTransform = "uppercase";
   // Themed to match the dark panel it now sits on - a default white field
@@ -2189,18 +2198,41 @@ function positionRoomCodeInput() {
   //centered at game-space (300, 95), matching where the join-entry screen
   //draws its heading around
   var gx = 300, gy = 95, gw = 180, gh = 34;
-  roomCodeInputElt.style.left = (rect.left + (gx - gw / 2) * scaleX) + "px";
-  roomCodeInputElt.style.top = (rect.top + (gy - gh / 2 + viewOffsetY) * scaleY) + "px";
-  roomCodeInputElt.style.width = (gw * scaleX) + "px";
-  roomCodeInputElt.style.height = (gh * scaleY) + "px";
-  roomCodeInputElt.style.fontSize = Math.round(18 * scaleY) + "px";
+
+  // iOS Safari zooms the entire page in when you focus an input whose text is
+  // smaller than 16px - and it ignores user-scalable=no while doing it, so the
+  // meta viewport tag does not prevent this. The canvas is letterboxed to the
+  // screen, so the zoom leaves the game half off-screen with no way to scroll
+  // back, on the one screen a phone player has no way to avoid. A phone-shaped
+  // window scales this field to about 12px, so the floor is what matters here.
+  var fontPx = Math.max(MIN_INPUT_FONT_PX, Math.round(18 * scaleY));
+  //the box grows with the text rather than clipping it
+  var boxWidth = Math.max(gw * scaleX, fontPx * 8);
+  var boxHeight = Math.max(gh * scaleY, fontPx + 12);
+  var letterSpacingPx = Math.round(fontPx * 0.35);
+
+  roomCodeInputElt.style.left = (rect.left + gx * scaleX - boxWidth / 2) + "px";
+  roomCodeInputElt.style.top = (rect.top + (gy + viewOffsetY) * scaleY - boxHeight / 2) + "px";
+  roomCodeInputElt.style.width = boxWidth + "px";
+  roomCodeInputElt.style.height = boxHeight + "px";
+  roomCodeInputElt.style.fontSize = fontPx + "px";
+  // Letter-spacing adds its gap AFTER the last character too, and that
+  // trailing gap is part of what gets centered - so the four visible
+  // characters sat half a gap left of centre. The indent puts them back.
+  roomCodeInputElt.style.letterSpacing = letterSpacingPx + "px";
+  roomCodeInputElt.style.textIndent = Math.round(letterSpacingPx / 2) + "px";
 }
 
+// Safe to call twice for one tap - see the JOIN branch of
+// onCanvasPointerDown() - so it only clears the field when it was actually
+// hidden, rather than wiping whatever has been typed.
 function showRoomCodeInput() {
   if (!roomCodeInputElt) {
     return;
   }
-  roomCodeInputElt.value = "";
+  if (roomCodeInputElt.style.display === "none") {
+    roomCodeInputElt.value = "";
+  }
   roomCodeInputElt.style.display = "block";
   positionRoomCodeInput();
   roomCodeInputElt.focus();

@@ -43,6 +43,7 @@ const UNIT = [
   "disconnect-test.js",
   "ui-test.js",
   "resize-test.js",
+  "roominput-test.js",
   "statemachine-test.js",
   "highscore-test.js",
   "connect-test.js",

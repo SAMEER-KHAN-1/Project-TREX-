@@ -105,6 +105,7 @@ they cover, and why each exists:
 | `disconnect-test` | A decided result survives a dropped socket; no rematch into an empty room |
 | `ui-test` | Button hover/press, and every overlay screen renders |
 | `resize-test` | Buttons and touch zones survive rotation and resizing |
+| `roominput-test` | The room code field is typable on seven device shapes |
 | `statemachine-test` | Every screen transition, plus forfeits and dropped sockets |
 | `highscore-test` | A new best survives closing the tab, without writing every frame |
 | `connect-test` | A sleeping server explains itself, then gives up rather than hanging |
