@@ -719,10 +719,10 @@ var mpGhostY = null;
 // decided on - this one is a live readout that is expected to lag slightly.
 var mpOpponentLiveScore = null;
 
-//how long "OPPONENT CRASHED" stays up after they go out, in a race you are
-//still running
+//how long the "they are out of it" banner stays up, in a race you are still
+//running - whether they crashed or quit
 var MP_CRASH_BANNER_MS = 2500;
-var mpOpponentCrashBannerUntil = 0;
+var mpOpponentGoneBannerUntil = 0;
 
 function mpResetRaceState() {
   mpIsRacing = false;
@@ -738,7 +738,7 @@ function mpResetRaceState() {
   mpGhostY = null;
   mpLastStateSentMillis = 0;
   mpOpponentLiveScore = null;
-  mpOpponentCrashBannerUntil = 0;
+  mpOpponentGoneBannerUntil = 0;
   mpRematchRequested = false;
   mpOpponentWantsRematch = false;
   //cleared here too, so a tap that landed just as the next race began can't
@@ -797,7 +797,7 @@ function mpHandleMessage(msg) {
     //only worth announcing to a player still running - it turns their race
     //from "stay ahead" into a concrete score to beat
     if (mpIsRacing && !mpSelfFinished) {
-      mpOpponentCrashBannerUntil = millis() + MP_CRASH_BANNER_MS;
+      mpOpponentGoneBannerUntil = millis() + MP_CRASH_BANNER_MS;
     }
   } else if (msg.type === "error") {
     mpConnectionMessage = msg.message;
@@ -817,6 +817,12 @@ function mpHandleMessage(msg) {
       mpOpponentLeft = true;
       mpOpponentFinished = true;
       mpOpponentScore = null;
+      // Their last reported state is now a fiction and must not keep being
+      // drawn as a live rival: the ghost would jog on the spot with its legs
+      // moving, beside a scoreboard still counting a gap to a player who has
+      // closed the tab. Announce it and take them off the track instead.
+      mpOpponentAlive = false;
+      mpOpponentGoneBannerUntil = millis() + MP_CRASH_BANNER_MS;
     } else {
       mpConnectionMessage = "Opponent disconnected.";
       mpDisconnect();
@@ -899,6 +905,11 @@ function mpShouldDrawGhost() {
   if (mpOpponentY === null) {
     return false;
   }
+  //a forfeited opponent has no position to show - see the forfeit branch of
+  //mpHandleMessage()
+  if (mpOpponentLeft) {
+    return false;
+  }
   //while racing, and while dead but still watching them finish
   return mpIsRacing || (gameState === MULTIPLAYER_RESULT && !mpOpponentFinished);
 }
@@ -966,15 +977,22 @@ function drawRaceScoreboard(textShade) {
   text("YOU  " + padScore(score), right, SCORE_MARGIN);
 
   // Once they have crashed their score stops being a moving target and starts
-  // being a finish line, so it says so.
+  // being a finish line, so it says so. A forfeit is the exception: there is
+  // no score left to beat, so showing their last live number as a target -
+  // which is what "BEAT 0472" did - invents a race that is already over.
   var theirScore = mpOpponentLiveScore === null ? 0 : mpOpponentLiveScore;
   fill(GHOST_TINT[0], GHOST_TINT[1], GHOST_TINT[2]);
-  text((mpOpponentFinished ? "BEAT " : "THEM ") + padScore(theirScore), right, SCORE_MARGIN + 20);
+  if (mpOpponentLeft) {
+    text("THEM  LEFT", right, SCORE_MARGIN + 20);
+  } else {
+    text((mpOpponentFinished ? "BEAT " : "THEM ") + padScore(theirScore), right, SCORE_MARGIN + 20);
+  }
 
   // The gap, which is the only number either player is actually tracking.
   // Suppressed before the opponent has reported anything, so it doesn't flash
-  // a meaningless lead during the countdown.
-  if (mpOpponentLiveScore !== null) {
+  // a meaningless lead during the countdown - and after a forfeit, when the
+  // gap would grow against a number that stopped moving when they quit.
+  if (mpOpponentLiveScore !== null && !mpOpponentLeft) {
     var lead = Math.floor(score) - theirScore;
     textSize(11);
     if (lead > 0) {
@@ -991,13 +1009,28 @@ function drawRaceScoreboard(textShade) {
   pop();
 }
 
-function drawOpponentCrashBanner() {
-  if (millis() > mpOpponentCrashBannerUntil) {
+function drawOpponentGoneBanner() {
+  if (millis() > mpOpponentGoneBannerUntil) {
     return;
   }
   push();
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
+
+  // A forfeit is not a crash, and saying so matters: the player needs to know
+  // the ghost that just vanished from beside them left rather than died, and
+  // that there is no longer a score to chase.
+  if (mpOpponentLeft) {
+    fill(200, 60, 60);
+    textSize(13);
+    text("OPPONENT LEFT", GAME_WIDTH / 2, 40);
+    fill(60, 160, 90);
+    textSize(9);
+    text("RACE WON - FINISH YOUR RUN", GAME_WIDTH / 2, 60);
+    pop();
+    return;
+  }
+
   fill(200, 60, 60);
   textSize(13);
   text("OPPONENT CRASHED", GAME_WIDTH / 2, 40);
@@ -2864,7 +2897,7 @@ function draw() {
     if (mpIsRacing) {
       mpSendState();
       drawRaceGoFlash();
-      drawOpponentCrashBanner();
+      drawOpponentGoneBanner();
     }
     drawControlsHint(textShade);
 

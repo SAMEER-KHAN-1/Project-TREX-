@@ -289,7 +289,7 @@ function startedRace(seed) {
   s.mpSocket.onmessage({ data: JSON.stringify({ type: "opponent_finished", score: 5 }) });
   frames(s, 60);
   check("you keep racing after they crash", s.gameState === s.PLAY && s.mpIsRacing);
-  check("their crash raises a banner", s.mpOpponentCrashBannerUntil > 0);
+  check("their crash raises a banner", s.mpOpponentGoneBannerUntil > 0);
   const scoreAtCrash = Math.floor(s.score);
   s.trexHitsAnyObstacle = () => true; frames(s, 1); s.trexHitsAnyObstacle = () => false;
   check("final score is the score you crashed on", s.mpSelfScore === scoreAtCrash, "got " + s.mpSelfScore + " want " + scoreAtCrash);
