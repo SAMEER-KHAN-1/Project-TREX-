@@ -1669,18 +1669,75 @@ var MULTIPLAYER_JOIN_SUBMIT_BUTTON = { x: 300, y: 140, w: 160, h: 30 };
 //below the restart icon (centered at 300,140, ~32px tall) on the game-over screen
 var END_MENU_BUTTON = { x: 300, y: 180, w: 110, h: 24 };
 
-// How far outside the slab still counts as a hit. Vertically this is exactly
-// BUTTON_LIFT, because the slab is drawn with its shadow that far below the
-// box - without it the bottom few pixels of what the player can see are dead.
-// Horizontally there is more room to give, and no two buttons on any screen
-// sit closer than 24px apart, so a fingertip landing just off the edge is
-// read as the hit it was meant to be.
+// The floor for how far outside the slab still counts as a hit. Vertically
+// this is exactly BUTTON_LIFT, because the slab is drawn with its shadow that
+// far below the box - without it the bottom few pixels of what the player can
+// see are dead.
 var BUTTON_HIT_PAD_X = 6;
 var BUTTON_HIT_PAD_Y = 3;
 
+// ---------------------------------------------------------------------------
+// Touch targets
+//
+// A button 32 game units tall is 32 CSS pixels only on a screen showing the
+// canvas at 1:1. On a 390px-wide phone the canvas is scaled to 0.65, so that
+// same button is 21 CSS pixels - under half the ~44 a fingertip can reliably
+// land on. Every near miss then reads as the button being in the wrong place
+// rather than as the button being small, which is the worse of the two
+// complaints because there is nothing the player can do about it.
+//
+// So a hit box grows towards that minimum - but never into a neighbour. Each
+// button may claim at most half the empty space between itself and the next
+// thing on the screen, which means the boxes can meet but never overlap and
+// no tap is ever ambiguous. Growth is clamped on whichever axis the two are
+// actually separated on: buttons stacked in a column must not reach for each
+// other vertically, but either may grow as wide as it likes.
+// ---------------------------------------------------------------------------
+var MIN_TOUCH_TARGET_CSS_PX = 44;
+
+//how many game units one CSS pixel covers - see fillScreen()
+var unitsPerCssPixel = 1;
+
+//written by computeButtonHitPad(), read straight after; a returned object
+//would allocate on every hit test, of which there are several per frame
+var hitPadX = BUTTON_HIT_PAD_X;
+var hitPadY = BUTTON_HIT_PAD_Y;
+
+function clampHitPadAgainst(button, otherX, otherY, otherW, otherH) {
+  var gapX = Math.abs(otherX - button.x) - (button.w + otherW) / 2;
+  var gapY = Math.abs(otherY - button.y) - (button.h + otherH) / 2;
+  if (gapY >= gapX) {
+    hitPadY = Math.min(hitPadY, Math.max(0, gapY / 2));
+  } else {
+    hitPadX = Math.min(hitPadX, Math.max(0, gapX / 2));
+  }
+}
+
+function computeButtonHitPad(button) {
+  var minSize = MIN_TOUCH_TARGET_CSS_PX * unitsPerCssPixel;
+  hitPadX = Math.max(BUTTON_HIT_PAD_X, (minSize - button.w) / 2);
+  hitPadY = Math.max(BUTTON_HIT_PAD_Y, (minSize - button.h) / 2);
+
+  var neighbours = buttonsOnScreen();
+  for (var i = 0; i < neighbours.length; i++) {
+    if (neighbours[i] !== button) {
+      clampHitPadAgainst(button, neighbours[i].x, neighbours[i].y,
+                         neighbours[i].w, neighbours[i].h);
+    }
+  }
+  // The restart icon is not in that list - it is a sprite, not a button - but
+  // it is very much a target, and it sits directly above the game-over MENU
+  // button. Left out, MENU would grow up over it on a narrow phone.
+  if (restart && restart.visible) {
+    clampHitPadAgainst(button, restart.x, restart.y,
+                       restart.width * restart.scale, restart.height * restart.scale);
+  }
+}
+
 function isOverButton(button, x, y) {
-  return Math.abs(x - button.x) <= button.w / 2 + BUTTON_HIT_PAD_X &&
-         Math.abs(y - button.y) <= button.h / 2 + BUTTON_HIT_PAD_Y;
+  computeButtonHitPad(button);
+  return Math.abs(x - button.x) <= button.w / 2 + hitPadX &&
+         Math.abs(y - button.y) <= button.h / 2 + hitPadY;
 }
 
 //consumed in draw() rather than acted on immediately, same reasoning as
@@ -2606,6 +2663,9 @@ function fillScreen() {
     canvasElt.style.width = cssWidth + "px";
     canvasElt.style.height = cssHeight + "px";
   }
+  //what a CSS pixel is worth in game units, which is what decides how far a
+  //hit box has to grow to be reliably tappable - see MIN_TOUCH_TARGET_CSS_PX
+  unitsPerCssPixel = cssWidth > 0 ? width / cssWidth : 1;
   appliedLayout.width = screenWidth;
   appliedLayout.height = screenHeight;
 }

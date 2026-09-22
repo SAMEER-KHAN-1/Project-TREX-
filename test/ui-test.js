@@ -367,6 +367,53 @@ sandbox.nightAmount = 0;
   check("the beaten best is not also shown", !drewText("BEST 01600"));
 }
 
+// On the game over screen every tap counts as "restart" - that is what makes
+// tapping anywhere retry - so a tap on the MENU button is two things at once.
+// The END branch resolves it by consuming both in the same frame, with MENU
+// last and therefore winning. That is easy to break by moving either check,
+// and breaking it is not obvious: it would restart the run under the finger
+// that asked to leave, and strand a request for the next game over to act on.
+{
+  function tapAt(button) {
+    const point = { clientX: button.x, clientY: button.y, pointerType: "touch" };
+    listeners.pointerdown(point);
+    sandbox.touchStarted({ touches: [point] });
+  }
+
+  sandbox.mpIsRacing = false;
+  sandbox.gameState = sandbox.END;
+  sandbox.restartKeyWasDown = false;
+  sandbox.touchIsDown = false;
+  sandbox.restartRequested = false;
+  sandbox.endMenuRequested = false;
+  frame();
+
+  tapAt(sandbox.END_MENU_BUTTON);
+  clock += 16; rects.length = 0; texts.length = 0; sandbox.draw();
+  check("tapping MENU on game over reaches the menu",
+    sandbox.gameState === sandbox.MENU, "state " + sandbox.gameState);
+  check("tapping MENU leaves no request behind", sandbox.endMenuRequested === false);
+
+  // And the next game over must not act on anything left over from it.
+  sandbox.touchIsDown = false;
+  sandbox.gameState = sandbox.END;
+  sandbox.restartKeyWasDown = false;
+  frame();
+  check("the next game over stays put", sandbox.gameState === sandbox.END,
+    "state " + sandbox.gameState);
+
+  // A tap anywhere else on that screen must still retry - it is the whole
+  // point of the screen.
+  sandbox.touchIsDown = false;
+  sandbox.restartKeyWasDown = false;
+  frame();
+  sandbox.touchStarted({ touches: [{ clientX: 80, clientY: 40 }] });
+  clock += 16; sandbox.draw();
+  check("tapping elsewhere still retries", sandbox.gameState === sandbox.PLAY,
+    "state " + sandbox.gameState);
+  sandbox.touchIsDown = false;
+}
+
 // Race result. The margin gauge is the race HUD's own gauge frozen at the
 // final gap - two five-digit numbers make you subtract to find out whether it
 // was close.

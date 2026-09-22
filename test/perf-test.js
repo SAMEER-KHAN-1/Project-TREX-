@@ -23,6 +23,7 @@ let clock = 0;
 let tintCalls = 0;
 let graphicsBuilt = 0;
 let imageDraws = 0;
+const builtSizes = [];
 const alphaSeen = [];
 const canvasStyle = {};
 
@@ -82,6 +83,7 @@ const sandbox = {
   width: 600, height: 200, windowWidth: 1200, windowHeight: 400,
   createGraphics: (w, h) => {
     graphicsBuilt++;
+    builtSizes.push(w + "x" + h);
     let source = null;
     return {
       width: w, height: h, pixels: [60, 60, 60, 255], clear: noop,
@@ -119,20 +121,43 @@ function setUpNightRace() {
   }
 }
 
+// Caches are built lazily, the first time each asset is drawn. Warming them
+// by playing frames would make these counts depend on which cactus the
+// obstacle stream happened to deal out, so every image the game can reach is
+// warmed directly instead.
+function warmEveryCache() {
+  const images = [
+    sandbox.trex_running, sandbox.trex_collided, sandbox.groundImage, sandbox.cloudImage,
+    sandbox.gameOverImg, sandbox.restartImg, sandbox.crowFrame1, sandbox.crowFrame2,
+    sandbox.boulderImage, sandbox.ghostCollidedImage,
+  ];
+  for (let i = 1; i <= 6; i++) images.push(sandbox["obstacle" + i]);
+  for (const f of sandbox.ghostRunFrames) images.push(f);
+  for (const o of sandbox.obstaclesGroup) images.push(o.animation.getFrameImage());
+  //the art the sprites are actually wearing, which is not always the same
+  //object as the module-level image it was loaded from
+  images.push(sandbox.trex.animation.getFrameImage());
+  for (const img of images) {
+    if (!img || !img.width) continue;
+    sandbox.nightOutlineInfo(img);
+    sandbox.tintedImage(img, sandbox.GHOST_TINT);
+    //the collision silhouette is built from an offscreen buffer too, the
+    //first time a given piece of art is tested against
+    sandbox.imageProfile(img);
+  }
+}
+
 setUpNightRace();
-// Caches are warmed lazily, per asset, so the warm-up has to run long enough
-// for every ghost frame to have come around once - otherwise the first cycle
-// through them looks like a per-frame allocation.
-for (let i = 0; i < 12; i++) { clock += sandbox.GHOST_FRAME_MS; sandbox.draw(); }
+warmEveryCache();
 const warmUpGraphics = graphicsBuilt;
 
-tintCalls = 0; graphicsBuilt = 0; imageDraws = 0; alphaSeen.length = 0;
+tintCalls = 0; graphicsBuilt = 0; imageDraws = 0; alphaSeen.length = 0; builtSizes.length = 0;
 const FRAMES = 60;
 for (let i = 0; i < FRAMES; i++) { clock += 16; sandbox.draw(); }
 
 console.log("a night race, " + FRAMES + " frames, " + imageDraws + " images drawn");
 check("no per-frame tint() at all", tintCalls === 0, tintCalls + " calls");
-check("no per-frame offscreen buffers", graphicsBuilt === 0, graphicsBuilt + " built");
+check("no per-frame offscreen buffers", graphicsBuilt === 0, graphicsBuilt + " built: " + builtSizes.join(","));
 check("the frame really did draw images", imageDraws > FRAMES, String(imageDraws));
 check("caches were warmed once, up front", warmUpGraphics > 0, String(warmUpGraphics));
 
@@ -143,20 +168,13 @@ check("images are drawn at a reduced alpha",
 check("globalAlpha is restored afterwards", drawingContext.globalAlpha === 1,
   String(drawingContext.globalAlpha));
 
-// Fading in and out of night must not rebuild anything. Run the fade twice:
-// the first pass may legitimately build a buffer for an asset it is seeing
-// for the first time (a cactus that had not spawned yet), but by the second
-// pass every one of them has been seen, so it must build nothing at all.
-function fadeThroughNight() {
-  for (let i = 0; i < 30; i++) {
-    sandbox.nightAmount = i / 29;
-    clock += 16;
-    sandbox.draw();
-  }
-}
-fadeThroughNight();
+//fading in and out of night must not rebuild anything either
 graphicsBuilt = 0;
-fadeThroughNight();
+for (let i = 0; i < 30; i++) {
+  sandbox.nightAmount = i / 29;
+  clock += 16;
+  sandbox.draw();
+}
 check("fading into night rebuilds nothing", graphicsBuilt === 0, String(graphicsBuilt));
 
 // Every ghost frame is recoloured once, on the frame it is first shown, and

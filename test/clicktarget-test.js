@@ -199,6 +199,80 @@ check("canvas followed the new viewport", sandbox.height === Math.round(600 * 84
   check("buttons still hit where painted", missed.length === 0, "missed y=" + missed.join(","));
 }
 
+// Touch targets. A 32-unit button on a 390px phone is 21 CSS pixels tall,
+// under half what a fingertip reliably lands on - so hit boxes grow towards a
+// usable minimum. They must grow, they must use all the room they are given,
+// and they must stop before they overlap: an ambiguous tap is worse than a
+// small one.
+console.log("");
+console.log("touch target sizing");
+resizeTo(390, 844);
+//the END screen above leaves the restart icon showing, and it is clamped
+//against as a target - on any other screen it is not on the screen at all
+sandbox.restart.visible = false;
+{
+  const cssPerUnit = cssBox.height / sandbox.height;
+  //how far from a button's centre the hit test still agrees, in game units
+  function reachFrom(b) {
+    let reach = b.h / 2;
+    while (sandbox.isOverButton(b, b.x, b.y + reach) && reach < 300) reach += 0.5;
+    return reach;
+  }
+
+  sandbox.gameState = sandbox.MENU;
+  frame();
+  const stacked = sandbox.buttonsOnScreen();
+  check("stacked hit boxes grow past their slabs",
+    stacked.every((b) => reachFrom(b) > b.h / 2),
+    stacked.map((b) => reachFrom(b) + ">" + b.h / 2).join(" "));
+
+  // Adjacent boxes have to meet. A gap between them is space the player can
+  // tap that does nothing, which is exactly the complaint growing them was
+  // meant to answer.
+  const lower = stacked[0].y < stacked[1].y ? stacked[1] : stacked[0];
+  const upper = lower === stacked[0] ? stacked[1] : stacked[0];
+  const midpoint = (upper.y + upper.h / 2 + (lower.y - lower.h / 2)) / 2;
+  check("adjacent hit boxes meet with no dead gap",
+    sandbox.isOverButton(upper, upper.x, midpoint) ||
+    sandbox.isOverButton(lower, lower.x, midpoint));
+
+  // With no neighbour on that axis there is nothing to clamp, so the target
+  // reaches the full minimum.
+  sandbox.gameState = sandbox.MULTIPLAYER_WAITING;
+  sandbox.mpRoomCode = "AB12";
+  frame();
+  const sideBySide = sandbox.buttonsOnScreen();
+  check("an unclamped axis reaches the full minimum",
+    sideBySide.every((b) => Math.abs(reachFrom(b) * 2 * cssPerUnit - sandbox.MIN_TOUCH_TARGET_CSS_PX) < 1),
+    sideBySide.map((b) => Math.round(reachFrom(b) * 2 * cssPerUnit)).join(","));
+
+  // Two boxes that meet share the line they meet on, and that is fine - a
+  // press takes the first match, so it is decided rather than random. What
+  // must never happen is the two overlapping across a band of the screen,
+  // where which button you get depends on a pixel you cannot see. Sampled
+  // finely enough that a real overlap shows up as a run of points and a
+  // shared edge shows up as one.
+  const STEP = 0.25;
+  const overlaps = [];
+  for (const [name, enter] of SCREENS) {
+    enter();
+    frame();
+    const onScreen = sandbox.buttonsOnScreen();
+    let run = 0;
+    for (let y = 0; y <= sandbox.GAME_HEIGHT; y += STEP) {
+      for (const x of [300, 213, 387]) {
+        if (onScreen.filter((b) => sandbox.isOverButton(b, x, y)).length > 1) {
+          run++;
+          if (run > 3) overlaps.push(name + " @" + x + "," + y);
+        } else {
+          run = 0;
+        }
+      }
+    }
+  }
+  check("hit boxes meet but never overlap", overlaps.length === 0, overlaps.slice(0, 4).join(" "));
+}
+
 // A canvas p5 has replaced measures 0 in every direction; the handler must
 // pick the live one up rather than turn every click into a miss.
 console.log("");
