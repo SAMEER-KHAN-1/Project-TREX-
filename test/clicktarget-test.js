@@ -221,7 +221,9 @@ sandbox.restart.visible = false;
 
   sandbox.gameState = sandbox.MENU;
   frame();
-  const stacked = sandbox.buttonsOnScreen();
+  //the screen's own stack, not the mute/pause controls that sit above every
+  //screen in the opposite corner
+  const stacked = sandbox.screenButtons();
   check("stacked hit boxes grow past their slabs",
     stacked.every((b) => reachFrom(b) > b.h / 2),
     stacked.map((b) => reachFrom(b) + ">" + b.h / 2).join(" "));
@@ -241,7 +243,7 @@ sandbox.restart.visible = false;
   sandbox.gameState = sandbox.MULTIPLAYER_WAITING;
   sandbox.mpRoomCode = "AB12";
   frame();
-  const sideBySide = sandbox.buttonsOnScreen();
+  const sideBySide = sandbox.screenButtons();
   check("an unclamped axis reaches the full minimum",
     sideBySide.every((b) => Math.abs(reachFrom(b) * 2 * cssPerUnit - sandbox.MIN_TOUCH_TARGET_CSS_PX) < 1),
     sideBySide.map((b) => Math.round(reachFrom(b) * 2 * cssPerUnit)).join(","));

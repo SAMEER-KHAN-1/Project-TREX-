@@ -16,8 +16,8 @@ whether they cleared the cactus you're about to hit. Highest score wins.
 | --- | --- | --- |
 | Jump — **hold longer to jump higher** | `Space` / `↑` / `W` | tap the top half |
 | Duck (and fast-fall in mid-air) | `↓` / `S` | hold the bottom half |
-| Pause | `P` | — |
-| Mute | `M` | — |
+| Pause | `P` | pause button, top left |
+| Mute | `M` | speaker button, top left |
 | Fullscreen | `F` | — |
 | Restart after a crash | `Space` / `↑` / `W` / `Enter` | tap anywhere |
 | Rematch (after a race) | `R` | REMATCH button |
@@ -31,6 +31,10 @@ Things that show up as you survive longer: crows you have to **duck** rather
 than jump, low crow pairs that force a duck straight into a jump, boulders, and
 a day/night cycle that flips every 700 points. Dark sprites get a white outline
 at night so they stay readable against the dark sky and sand.
+
+The speaker and pause buttons sit in the top-left corner of the playfield and
+are the only way to reach either without a keyboard. A tap on one of them is
+just that — it does not also jump, or retry a finished run.
 
 Pausing is disabled during a race — your opponent's run carries on regardless,
 so it would just be free thinking time.

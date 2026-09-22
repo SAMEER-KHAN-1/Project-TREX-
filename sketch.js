@@ -549,10 +549,31 @@ function isDuckTouchPoint(pointerEvent) {
 // Reading the whole list makes both correct by construction, and handles
 // touchcancel (a system gesture or an incoming call) for free, since that
 // event's touches list is already missing the interrupted finger.
+// A finger on the mute or pause button is doing that and nothing else. Left
+// out, the tap that silenced the game would also jump the trex into the next
+// cactus - and on the game-over screen, where every tap retries, the tap that
+// muted it would have restarted the run underneath.
+function isHudControlTouch(pointerEvent) {
+  var point = canvasPointerToGame(pointerEvent);
+  if (point === null) {
+    return false;
+  }
+  var controls = hudControlsOnScreen();
+  for (var i = 0; i < controls.length; i++) {
+    if (isOverButton(controls[i], point.x, point.y)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function updateTouchZones(e) {
   var jumping = false;
   var ducking = false;
   for (var i = 0; i < e.touches.length; i++) {
+    if (isHudControlTouch(e.touches[i])) {
+      continue;
+    }
     // The zone split only means something during gameplay - on the game-over
     // and menu screens every tap should count as a press, rather than one on
     // the lower half being swallowed as a duck and silently doing nothing.
@@ -1669,6 +1690,32 @@ var MULTIPLAYER_JOIN_SUBMIT_BUTTON = { x: 300, y: 140, w: 160, h: 30 };
 //below the restart icon (centered at 300,140, ~32px tall) on the game-over screen
 var END_MENU_BUTTON = { x: 300, y: 180, w: 110, h: 24 };
 
+// ---------------------------------------------------------------------------
+// HUD controls
+//
+// Mute and pause were keyboard-only - M and P - which meant that on a phone,
+// where this game is most likely to be played and where it is most likely to
+// be playing sound at a bad moment, neither existed at all. There was no way
+// to silence it and no way to stop it.
+//
+// They live in the top-left of the playfield, the one corner nothing else
+// uses: the score plate is pinned right, the overlay panels start at x=98,
+// and the trex runs in from x=50 at ground level.
+// ---------------------------------------------------------------------------
+var MUTE_BUTTON = { x: 26, y: 22, w: 26, h: 26 };
+var PAUSE_BUTTON = { x: 58, y: 22, w: 26, h: 26 };
+
+//pause is meaningless outside a run, and a race must never be pausable - the
+//opponent keeps running on their own machine, so it would only ever hand the
+//pauser thinking time they have not earned
+function pauseControlIsAvailable() {
+  return (gameState === PLAY || gameState === PAUSED) && !mpIsRacing;
+}
+
+function hudControlsOnScreen() {
+  return pauseControlIsAvailable() ? [MUTE_BUTTON, PAUSE_BUTTON] : [MUTE_BUTTON];
+}
+
 // The floor for how far outside the slab still counts as a hit. Vertically
 // this is exactly BUTTON_LIFT, because the slab is drawn with its shadow that
 // far below the box - without it the bottom few pixels of what the player can
@@ -1751,6 +1798,8 @@ var multiplayerJoinSubmitRequested = false;
 var multiplayerLeaveRequested = false;
 var multiplayerRematchRequested = false;
 var endMenuRequested = false;
+var muteRequested = false;
+var pauseRequested = false;
 
 //only a real mouse hovers - see the comment on pointerGamePos
 function onCanvasPointerMove(evt) {
@@ -1771,7 +1820,13 @@ function onPointerRelease() {
 // Every button this screen is currently showing, so a press can be attributed
 // to one without each screen repeating its own hit-testing. Order matters only
 // in that no two buttons overlap on any one screen.
+//the screen's own buttons, plus the mute/pause controls that outlive any one
+//screen - so presses, hover, and the touch-target clamp all treat them alike
 function buttonsOnScreen() {
+  return hudControlsOnScreen().concat(screenButtons());
+}
+
+function screenButtons() {
   if (gameState === MENU) {
     return [MENU_SINGLE_PLAYER_BUTTON, MENU_MULTIPLAYER_BUTTON];
   }
@@ -1814,6 +1869,19 @@ function onCanvasPointerDown(evt) {
       break;
     }
   }
+
+  // Checked before anything else, and returning: these two sit on top of
+  // every screen, so a press on one is never also a press on whatever that
+  // screen has underneath.
+  if (isOverButton(MUTE_BUTTON, point.x, point.y)) {
+    muteRequested = true;
+    return;
+  }
+  if (pauseControlIsAvailable() && isOverButton(PAUSE_BUTTON, point.x, point.y)) {
+    pauseRequested = true;
+    return;
+  }
+
   if (isOverRestart(point.x, point.y)) {
     restartRequested = true;
   } else if (gameState === END) {
@@ -2016,7 +2084,9 @@ function buttonIsHovered(button) {
          isOverButton(button, pointerGamePos.x, pointerGamePos.y);
 }
 
-function drawButton(button, label, palette) {
+// Draws the slab and returns the y its face ended up at, so whatever goes on
+// top - a label, an icon - sinks with it.
+function drawButtonSlab(button, palette) {
   var colors = palette || BUTTON_PRIMARY;
   var hovered = buttonIsHovered(button);
   var pressed = pressedButton === button;
@@ -2054,7 +2124,14 @@ function drawButton(button, label, palette) {
   rect(button.x, slabY - button.h / 2 + bandHeight / 2 + 1, bandWidth, bandHeight);
   fill(0, 0, 0, pressed ? 20 : 54);
   rect(button.x, slabY + button.h / 2 - bandHeight / 2 - 1, bandWidth, bandHeight);
+  pop();
+  return slabY;
+}
 
+function drawButton(button, label, palette) {
+  var slabY = drawButtonSlab(button, palette);
+  push();
+  noStroke();
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
   textSize(10);
@@ -2065,6 +2142,71 @@ function drawButton(button, label, palette) {
   fill(255, 252, 244);
   text(label, button.x, slabY + 1);
   pop();
+}
+
+// ---------------------------------------------------------------------------
+// HUD control icons
+//
+// Built from axis-aligned rectangles rather than from triangle() or a font
+// glyph. At this size - about fourteen pixels across, drawn on a canvas that
+// is then scaled by whatever the screen is - anything with a diagonal edge
+// turns into a grey smear, and the rest of the game is hard pixel edges.
+// Stacking bars of decreasing height gives a play arrow that stays crisp.
+// ---------------------------------------------------------------------------
+var ICON_FILL = [255, 252, 244];
+
+function beginIcon() {
+  push();
+  rectMode(CENTER);
+  noStroke();
+  fill(ICON_FILL[0], ICON_FILL[1], ICON_FILL[2]);
+}
+
+function drawSpeakerIcon(x, y, muted) {
+  beginIcon();
+  //a squat box and a taller one make a speaker without a single diagonal
+  rect(x - 5, y, 4, 6);
+  rect(x - 2, y, 3, 12);
+  if (muted) {
+    //a bar straight through where the sound would have been
+    fill(INK[0], INK[1], INK[2]);
+    rect(x + 1, y, 12, 3);
+    fill(ICON_FILL[0], ICON_FILL[1], ICON_FILL[2]);
+    rect(x + 1, y, 12, 2);
+  } else {
+    rect(x + 3, y, 2, 6);
+    rect(x + 6, y, 2, 11);
+  }
+  pop();
+}
+
+function drawPauseIcon(x, y, paused) {
+  beginIcon();
+  if (paused) {
+    //a play arrow as four bars, tallest first
+    rect(x - 4, y, 2, 12);
+    rect(x - 2, y, 2, 9);
+    rect(x, y, 2, 6);
+    rect(x + 2, y, 2, 3);
+  } else {
+    rect(x - 3, y, 3, 12);
+    rect(x + 3, y, 3, 12);
+  }
+  pop();
+}
+
+// Muting is a state you can sit in for a whole session, so its button carries
+// the state rather than a separate badge appearing beside it - the control
+// and the indicator being two different things was one thing too many in a
+// corner this small.
+function drawHudControls() {
+  var muteSlabY = drawButtonSlab(MUTE_BUTTON, soundMuted ? BUTTON_SUBTLE : BUTTON_POSITIVE);
+  drawSpeakerIcon(MUTE_BUTTON.x, muteSlabY, soundMuted);
+
+  if (pauseControlIsAvailable()) {
+    var pauseSlabY = drawButtonSlab(PAUSE_BUTTON, BUTTON_SUBTLE);
+    drawPauseIcon(PAUSE_BUTTON.x, pauseSlabY, gameState === PAUSED);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2537,19 +2679,6 @@ function drawControlsHint() {
   text("SPACE / TAP TOP  -  JUMP  (HOLD TO GO HIGHER)", GAME_WIDTH / 2, 35);
   fill(PANEL_TEXT_DIM[0], PANEL_TEXT_DIM[1], PANEL_TEXT_DIM[2], 255 * alpha);
   text("DOWN / HOLD BOTTOM  -  DUCK", GAME_WIDTH / 2, 53);
-  pop();
-}
-
-function drawMutedBadge() {
-  //the same plate as every other card, just small enough to sit in a corner
-  drawInkCard(56, 20, 92, 20, 0.85);
-  push();
-  noStroke();
-  textFont('"Press Start 2P", monospace');
-  textAlign(LEFT, CENTER);
-  textSize(7);
-  panelFill(PANEL_TEXT);
-  text("MUTED  (M)", 18, 21);
   pop();
 }
 
@@ -3048,6 +3177,14 @@ var muteKeyWasDown = false;
 
 //toggle on a fresh press of M, not every frame it's held
 function handleMuteToggle() {
+  // A tap on the button is unambiguous in a way the M key is not - it cannot
+  // be someone typing a room code - so it skips the guard below entirely.
+  if (muteRequested) {
+    muteRequested = false;
+    soundMuted = !soundMuted;
+    saveMuted(soundMuted);
+    return;
+  }
   // Unlike handlePauseToggle() below, this has no gameState gate, so without
   // this check typing "M" as part of a room code (a valid character - see
   // ROOM_CODE_CHARS in server.js) would also toggle mute, since p5's own key
@@ -3075,10 +3212,12 @@ var pauseKeyWasDown = false;
 
 function handlePauseToggle() {
   var pauseKeyIsDown = keyHeld("p");
+  var pressed = (pauseKeyIsDown && !pauseKeyWasDown) || pauseRequested;
+  pauseRequested = false;
   // Pausing a race would be a free timeout - the opponent's run keeps going
   // on their own machine regardless, so this would only ever hand the pauser
   // thinking time they haven't earned.
-  if (pauseKeyIsDown && !pauseKeyWasDown && !mpIsRacing) {
+  if (pressed && !mpIsRacing) {
     if (gameState === PLAY) {
       gameState = PAUSED;
       ground.velocityX = 0;
@@ -3508,10 +3647,8 @@ function draw() {
   fill(textShade);
 
   handleMuteToggle();
-  if (soundMuted) {
-    drawMutedBadge();
-  }
   handlePauseToggle();
+  drawHudControls();
 
   if (gameState===PLAY){
     score = score + dtFactor;

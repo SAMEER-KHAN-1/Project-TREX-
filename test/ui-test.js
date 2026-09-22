@@ -182,14 +182,14 @@ function drawsWithoutThrowing(label, setUp) {
   }
 }
 
-drawsWithoutThrowing("muted badge draws", () => {
+drawsWithoutThrowing("mute control draws", () => {
   sandbox.gameState = sandbox.PLAY;
   sandbox.soundMuted = true;
 });
 drawsWithoutThrowing("paused overlay draws", () => {
   sandbox.gameState = sandbox.PAUSED;
 });
-drawsWithoutThrowing("muted badge draws at night", () => {
+drawsWithoutThrowing("mute control draws at night", () => {
   sandbox.gameState = sandbox.PLAY;
   sandbox.nightAmount = 1;
 });
@@ -229,6 +229,81 @@ sandbox.nightAmount = 0;
     if (!body || !frameRect) missingFrame.push(name);
   }
   check("every card is drawn as a keylined plate", missingFrame.length === 0, missingFrame.join("; "));
+}
+
+// Mute and pause were keyboard-only, so on a phone neither existed at all.
+{
+  const tap = (button) => {
+    const point = { clientX: button.x, clientY: button.y, pointerType: "touch" };
+    listeners.pointerdown(point);
+    sandbox.touchStarted({ touches: [point] });
+  };
+
+  sandbox.mpIsRacing = false;
+  sandbox.gameState = sandbox.PLAY;
+  sandbox.soundMuted = false;
+  sandbox.touchIsDown = false;
+  frame();
+
+  // A tap on a control is doing that and nothing else: on this screen it
+  // would otherwise also jump, and on the game-over screen it would retry.
+  tap(sandbox.MUTE_BUTTON);
+  check("tapping mute does not also jump", sandbox.touchIsDown === false);
+  frame();
+  check("tapping mute mutes", sandbox.soundMuted === true);
+
+  sandbox.touchIsDown = false;
+  tap(sandbox.MUTE_BUTTON);
+  frame();
+  check("tapping mute again unmutes", sandbox.soundMuted === false);
+
+  sandbox.touchIsDown = false;
+  tap(sandbox.PAUSE_BUTTON);
+  check("tapping pause does not also jump", sandbox.touchIsDown === false);
+  frame();
+  check("tapping pause pauses", sandbox.gameState === sandbox.PAUSED);
+  sandbox.touchIsDown = false;
+  tap(sandbox.PAUSE_BUTTON);
+  frame();
+  check("tapping pause again resumes", sandbox.gameState === sandbox.PLAY);
+
+  // A tap anywhere else still plays the game.
+  sandbox.touchIsDown = false;
+  sandbox.touchStarted({ touches: [{ clientX: 300, clientY: 40 }] });
+  check("tapping the playfield still jumps", sandbox.touchIsDown === true);
+  sandbox.touchIsDown = false;
+
+  // Pausing a race would be a free timeout - the opponent keeps running on
+  // their own machine - so the control is not offered during one.
+  sandbox.mpIsRacing = true;
+  frame();
+  check("no pause control during a race",
+    sandbox.hudControlsOnScreen().indexOf(sandbox.PAUSE_BUTTON) === -1);
+  sandbox.pauseRequested = true;
+  frame();
+  check("a race cannot be paused anyway", sandbox.gameState === sandbox.PLAY);
+  sandbox.mpIsRacing = false;
+  sandbox.pauseRequested = false;
+
+  // Mute outlives any one screen; pause only means something inside a run.
+  sandbox.gameState = sandbox.MENU;
+  frame();
+  check("mute is offered on the menu too",
+    sandbox.hudControlsOnScreen().indexOf(sandbox.MUTE_BUTTON) !== -1);
+  check("pause is not offered on the menu",
+    sandbox.hudControlsOnScreen().indexOf(sandbox.PAUSE_BUTTON) === -1);
+
+  // Typing a room code containing M must still not toggle mute - but a tap on
+  // the button is unambiguous and skips that guard.
+  sandbox.gameState = sandbox.MULTIPLAYER_JOIN_ENTRY;
+  sandbox.document.activeElement = sandbox.roomCodeInputElt;
+  sandbox.soundMuted = false;
+  tap(sandbox.MUTE_BUTTON);
+  frame();
+  check("tapping mute works while typing a code", sandbox.soundMuted === true);
+  sandbox.document.activeElement = null;
+  sandbox.soundMuted = false;
+  sandbox.touchIsDown = false;
 }
 
 // Score HUD. The live score is five zeros on every screen that has no run
