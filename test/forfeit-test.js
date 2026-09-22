@@ -66,7 +66,17 @@ function load() {
     drawSprites: noop, createSprite: makeSprite, Group: function () { return makeGroup(); },
     CENTER: "c", RIGHT: "r", TOP: "t", LEFT: "l", BOTTOM: "b", CORNER: "corner", CLOSE: "close",
     width: 600, height: 200, windowWidth: 1200, windowHeight: 400,
-    createGraphics: (w, h) => ({ width: w, height: h, pixels: [60, 60, 60, 255], clear: noop, image: noop, loadPixels: noop, updatePixels: noop, noStroke: noop, fill: noop, ellipse: noop, triangle: noop, beginShape: noop, vertex: noop, endShape: noop, stroke: noop, strokeWeight: noop, line: noop, get: () => fakeImage("white", w, h) }),
+    createGraphics: (w, h) => {
+      let source = null;
+    //the ghost is drawn as a pre-recoloured copy of its frame rather than
+    //as the frame under a live tint(), so the copy keeps the source's name -
+    //these tests are about which frame is on screen, not about the tint
+      return { width: w, height: h, pixels: [60, 60, 60, 255], clear: noop,
+        image: (img) => { source = img; }, loadPixels: noop, updatePixels: noop,
+        noStroke: noop, fill: noop, ellipse: noop, triangle: noop, beginShape: noop,
+        vertex: noop, endShape: noop, stroke: noop, strokeWeight: noop, line: noop,
+        get: () => fakeImage(source && source.__name ? source.__name : "white", w, h) };
+    },
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);

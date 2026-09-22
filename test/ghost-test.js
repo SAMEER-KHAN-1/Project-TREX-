@@ -17,7 +17,17 @@ const sandbox = {
   push: noop, pop: noop, tint: noop, imageMode: noop, CENTER: "center",
   image: (img, x, y, w, h) => drawn.push({ img: img.__name, x, y: +y.toFixed(2), w: +w.toFixed(2), h: +h.toFixed(2) }),
   random: () => 0.5, constrain: (v, lo, hi) => Math.min(hi, Math.max(lo, v)),
-  createGraphics: () => ({ clear: noop, noStroke: noop, fill: noop, ellipse: noop, triangle: noop, beginShape: noop, vertex: noop, endShape: noop, stroke: noop, strokeWeight: noop, line: noop, get: () => ({ width: 46, height: 30 }) }),
+  createGraphics: (w, h) => {
+    let source = null;
+    //the ghost is drawn as a pre-recoloured copy of its frame rather than
+    //as the frame under a live tint(), so the copy keeps the source's name -
+    //these tests are about which frame is on screen, not about the tint
+    return { width: w, height: h, pixels: [60, 60, 60, 255], clear: noop,
+      image: (img) => { source = img; }, loadPixels: noop, updatePixels: noop,
+      noStroke: noop, fill: noop, ellipse: noop, triangle: noop, beginShape: noop,
+      vertex: noop, endShape: noop, stroke: noop, strokeWeight: noop, line: noop,
+      get: () => ({ width: w || 46, height: h || 30, __name: source && source.__name }) };
+  },
 };
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);

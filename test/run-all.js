@@ -45,6 +45,7 @@ const UNIT = [
   "ui-test.js",
   "resize-test.js",
   "clicktarget-test.js",
+  "perf-test.js",
   "roominput-test.js",
   "statemachine-test.js",
   "highscore-test.js",

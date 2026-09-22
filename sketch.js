@@ -977,11 +977,11 @@ function drawOpponentGhost(dt) {
   //solid than the ghost it belongs to
   drawNightOutline(image_, trex.x, mpGhostY, w, h, nightAmount * (GHOST_ALPHA / 255));
 
-  push();
-  imageMode(CENTER);
-  tint(GHOST_TINT[0], GHOST_TINT[1], GHOST_TINT[2], GHOST_ALPHA);
-  image(image_, trex.x, mpGhostY, w, h);
-  pop();
+  //the blue is baked into the frame once rather than recomputed every time it
+  //is drawn - GHOST_TINT never changes, so neither does the result
+  beginImageAlpha(GHOST_ALPHA / 255);
+  image(tintedImage(image_, GHOST_TINT), trex.x, mpGhostY, w, h);
+  endImageAlpha();
 }
 
 // ---------------------------------------------------------------------------
@@ -1203,6 +1203,83 @@ var NIGHT_OUTLINE_LUMINANCE_MAX = 100;
 
 var nightOutlineCache = {};
 
+// ---------------------------------------------------------------------------
+// Drawing images cheaply
+//
+// p5 0.8.0's tint() is not a state flag the canvas honours - it is a pixel
+// filter with no cache at all. Every single image() call made while a tint is
+// set runs _getTintedImageCanvas(): a fresh <canvas> element, a full
+// getImageData of the source, a new ImageData, and a loop over every pixel.
+// Per call. The night outline used to make eight of those calls per outlined
+// sprite per frame, and this game asks for frames as fast as the display will
+// grant them - so on a 240Hz screen with a trex and four obstacles at night
+// that was ~10,000 canvas allocations and full-image pixel passes a second,
+// for an effect that is one flat colour.
+//
+// Alpha alone needs none of that. The 2D context has globalAlpha, which costs
+// nothing and composites at draw time, so anything whose only tint is
+// transparency is drawn between these two instead. tint() remains the
+// fallback for environments without a drawingContext - the test harness is
+// one, and it is what keeps the outline's behaviour covered either way.
+//
+// Not reentrant, by design: every caller draws a handful of images and ends,
+// and a saved-state stack for something that never nests would be the kind of
+// bookkeeping this whole block exists to remove.
+var imageAlphaCtx = null;
+var imageAlphaPrevious = 1;
+
+function beginImageAlpha(alpha) {
+  push();
+  imageMode(CENTER);
+  imageAlphaCtx = typeof drawingContext !== "undefined" ? drawingContext : null;
+  if (imageAlphaCtx) {
+    imageAlphaPrevious = imageAlphaCtx.globalAlpha;
+    imageAlphaCtx.globalAlpha = imageAlphaPrevious * alpha;
+  } else {
+    tint(255, 255, 255, 255 * alpha);
+  }
+}
+
+function endImageAlpha() {
+  if (imageAlphaCtx) {
+    imageAlphaCtx.globalAlpha = imageAlphaPrevious;
+    imageAlphaCtx = null;
+  }
+  pop();
+}
+
+// A colour tint that never changes can be applied once, when the image is
+// first cached, instead of on every frame it is drawn. The result is an
+// ordinary image, so drawing it costs a plain blit.
+var tintedImageCache = {};
+
+function tintedImage(img, rgb) {
+  if (img.__profileId === undefined) {
+    img.__profileId = nextProfileId++;
+  }
+  var key = img.__profileId + ":" + rgb[0] + "," + rgb[1] + "," + rgb[2];
+  var cached = tintedImageCache[key];
+  if (cached) {
+    return cached;
+  }
+  var g = createGraphics(img.width, img.height);
+  g.clear();
+  g.image(img, 0, 0);
+  g.loadPixels();
+  for (var i = 0; i < g.pixels.length; i += 4) {
+    if (g.pixels[i + 3] > 0) {
+      //the same multiply p5's own tint does, just done once rather than daily
+      g.pixels[i] = (g.pixels[i] * rgb[0]) / 255;
+      g.pixels[i + 1] = (g.pixels[i + 1] * rgb[1]) / 255;
+      g.pixels[i + 2] = (g.pixels[i + 2] * rgb[2]) / 255;
+    }
+  }
+  g.updatePixels();
+  cached = g.get();
+  tintedImageCache[key] = cached;
+  return cached;
+}
+
 // Builds both the white stamp and the is-this-too-dark verdict in one pixel
 // pass, since walking the image twice for two facts about the same pixels
 // would be wasteful. Luminance is read BEFORE the pixel is overwritten white.
@@ -1257,16 +1334,19 @@ function drawNightOutline(img, x, y, w, h, strength) {
     return;
   }
   var outline = info.silhouette;
-  push();
-  imageMode(CENTER);
-  tint(255, 255, 255, 255 * strength);
+  // Still eight stamps - the offsets are in destination pixels, so the
+  // outline stays two pixels thick whatever scale the sprite is drawn at, and
+  // baking them into the cached silhouette would make it thin out as sprites
+  // shrink. Eight scaled blits of a small image are cheap; it was the tint
+  // around them that was not.
+  beginImageAlpha(strength);
   for (var i = 0; i < OUTLINE_DIRECTIONS.length; i++) {
     image(outline,
           x + OUTLINE_DIRECTIONS[i][0] * NIGHT_OUTLINE_PX,
           y + OUTLINE_DIRECTIONS[i][1] * NIGHT_OUTLINE_PX,
           w, h);
   }
-  pop();
+  endImageAlpha();
 }
 
 // Deliberately reads the sprite's scale accessors rather than its width /
