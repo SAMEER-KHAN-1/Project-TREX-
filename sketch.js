@@ -1815,21 +1815,77 @@ function drawButton(button, label, palette) {
   pop();
 }
 
-function drawMenuScreen(textShade) {
+// ---------------------------------------------------------------------------
+// Menu - an arcade attract screen
+//
+// The title used to be flat text with a soft grey shadow, recoloured between
+// white and black to survive the day/night sky behind it. A cabinet doesn't
+// do that: it prints one bone-white title on a hard ink offset, which reads
+// against anything, and it never sits still - the demo keeps running behind
+// the marquee. Both of those are what this screen is now.
+// ---------------------------------------------------------------------------
+
+//how fast the world drifts by on the menu - a gentle jog, well under the
+//BASE_SPEED a real run opens at, so the menu reads as idling rather than racing
+var MENU_SCROLL_SPEED = 2.4;
+//full on/off cycle of the blinking prompt, in ms
+var MENU_BLINK_MS = 1100;
+
+// Never blinks fully out. A prompt that vanishes completely for half a second
+// reads as a rendering fault on a screen this small; dropping to a dim shade
+// still reads as an arcade blink.
+function menuBlinkAlpha() {
+  return (millis() % MENU_BLINK_MS) < MENU_BLINK_MS / 2 ? 255 : 90;
+}
+
+// The attract screen runs instead of freezing. The dino's own animation is
+// already looping, so scrolling the ground under it is the whole trick - it
+// stops looking like a paused game and starts looking like one waiting for a
+// player. Deliberately kept off every gameplay counter: no score, no
+// distance, no obstacle spawning, so sitting on the menu costs a run nothing.
+function updateMenuScenery(dtFactor) {
+  ground.velocityX = -MENU_SCROLL_SPEED * dtFactor;
+  if (ground.x < 0) {
+    ground.x = ground.width / 2;
+  }
+}
+
+//the ground keeps whatever velocity it was last given, so leaving the menu
+//has to put it back - every other non-play screen shows a still world
+function stopMenuScenery() {
+  ground.velocityX = 0;
+}
+
+function drawMenuScreen() {
   push();
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
+  noStroke();
+  rectMode(CENTER);
 
-  //a soft drop shadow keeps the title legible over both the day and night sky
-  fill(0, 0, 0, 45);
+  // Two flat layers, ink under bone, rather than a blurred shadow. The offset
+  // is 3px because that is the same lift the buttons use, so the title and
+  // the slabs below it look like they are standing off the same surface.
   textSize(20);
-  text("T-REX RUNNER", GAME_WIDTH / 2 + 2, 48 + 2);
-  fill(textShade);
-  text("T-REX RUNNER", GAME_WIDTH / 2, 48);
+  fill(INK[0], INK[1], INK[2]);
+  text("T-REX RUNNER", GAME_WIDTH / 2 + 3, 43 + 3);
+  panelFill(PANEL_TEXT);
+  text("T-REX RUNNER", GAME_WIDTH / 2, 43);
 
-  textSize(8);
-  fill(textShade === 255 ? 170 : 90);
-  text("RACE A FRIEND ON TWO DEVICES", GAME_WIDTH / 2, 72);
+  //the marquee's colour comes from a bar under the title rather than from the
+  //letters, which keeps the title itself readable over any sky
+  fill(INK[0], INK[1], INK[2]);
+  rect(GAME_WIDTH / 2 + 2, 58 + 2, 250, 4);
+  fill(BUTTON_PRIMARY.idle[0], BUTTON_PRIMARY.idle[1], BUTTON_PRIMARY.idle[2]);
+  rect(GAME_WIDTH / 2, 58, 250, 4);
+
+  //rules either side of the strapline, the way a cabinet bezel breaks up a row
+  fill(INK[0], INK[1], INK[2], 130);
+  rect(136, 76, 104, 2);
+  rect(464, 76, 104, 2);
+  textSize(7);
+  fill(INK[0], INK[1], INK[2], 210);
+  text("RACE A FRIEND ON TWO DEVICES", GAME_WIDTH / 2, 76);
   pop();
 
   drawButton(MENU_SINGLE_PLAYER_BUTTON, "SINGLE PLAYER");
@@ -1840,7 +1896,7 @@ function drawMenuScreen(textShade) {
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
   textSize(7);
-  fill(textShade === 255 ? 150 : 110);
+  fill(INK[0], INK[1], INK[2], menuBlinkAlpha());
   text("PRESS 1 OR 2   -   F FOR FULLSCREEN", GAME_WIDTH / 2, 183);
   pop();
 }
@@ -3188,12 +3244,16 @@ function draw() {
     drawPausedOverlay();
   }
   else if (gameState === MENU) {
-    drawMenuScreen(textShade);
+    updateMenuScenery(dtFactor);
+    drawMenuScreen();
     if (menuSinglePlayerRequested || keyWentDown("1")) {
       menuSinglePlayerRequested = false;
+      //PLAY drives the ground from currentSpeed() every frame, so it only
+      //needs stopping on the way to a screen that does not
       reset();
     } else if (menuMultiplayerRequested || keyWentDown("2")) {
       menuMultiplayerRequested = false;
+      stopMenuScenery();
       gameState = MULTIPLAYER_MENU;
     }
   }

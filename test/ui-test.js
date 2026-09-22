@@ -21,7 +21,10 @@ function makeSprite(x, y, w, h) {
   return {
     x, y, width: w, height: h, scale: 1, depth: 0, visible: true,
     velocityX: 0, velocityY: 0, lifetime: 0, animation: null, baseVelocityX: 0,
-    addImage(i) { this.animation = { getFrameImage: () => i }; this.width = i.width; this.height = i.height; },
+    //p5.play's addImage takes either (image) or (label, image) - the ground
+    //is added with a label, and reading the label as the image left the
+    //sprite's width NaN, which no wrap-around can be measured against
+    addImage(a, b) { const i = b || a; this.animation = { getFrameImage: () => i }; this.width = i.width; this.height = i.height; },
     addAnimation(n, f) { this.animation = { getFrameImage: () => f, frameDelay: 0 }; this.width = f.width; this.height = f.height; },
     changeAnimation: noop, setCollider: noop, collide: () => true, remove() {},
     _getScaleX() { return this.scale; }, _getScaleY() { return this.scale; },
@@ -221,6 +224,46 @@ sandbox.nightAmount = 0;
     if (!body || !frameRect) missingFrame.push(name);
   }
   check("every card is drawn as a keylined plate", missingFrame.length === 0, missingFrame.join("; "));
+}
+
+// The menu is an attract screen: the world runs behind it. It must run
+// without touching anything a real run counts, and it must stop the moment
+// the player leaves for a screen that shows a still world.
+{
+  sandbox.gameState = sandbox.MENU;
+  sandbox.score = 0;
+  sandbox.distanceTravelled = 0;
+  sandbox.ground.x = 500;
+  frame();
+  check("menu scrolls the ground", sandbox.ground.velocityX < 0, String(sandbox.ground.velocityX));
+  check("menu scrolls slower than a run opens at",
+    Math.abs(sandbox.ground.velocityX) < sandbox.BASE_SPEED, String(sandbox.ground.velocityX));
+  frame(); frame();
+  check("menu costs the run no score", sandbox.score === 0, String(sandbox.score));
+  check("menu costs the run no distance", sandbox.distanceTravelled === 0, String(sandbox.distanceTravelled));
+  check("menu spawns no obstacles", sandbox.obstaclesGroup.length === 0, String(sandbox.obstaclesGroup.length));
+
+  //the ground wraps rather than scrolling off to the left forever
+  sandbox.ground.x = -1;
+  frame();
+  check("menu ground wraps around", sandbox.ground.x > 0, String(sandbox.ground.x));
+
+  sandbox.menuMultiplayerRequested = true;
+  frame();
+  check("leaving the menu reaches the lobby", sandbox.gameState === sandbox.MULTIPLAYER_MENU);
+  check("leaving the menu stops the ground", sandbox.ground.velocityX === 0, String(sandbox.ground.velocityX));
+  frame();
+  check("the lobby world stays still", sandbox.ground.velocityX === 0, String(sandbox.ground.velocityX));
+}
+
+// The attract prompt blinks. Both phases have to actually occur, and neither
+// may be fully transparent - a prompt that disappears outright on a screen
+// this small reads as a fault rather than as a blink.
+{
+  const phases = new Set();
+  for (let t = 0; t < sandbox.MENU_BLINK_MS * 2; t += 50) { clock = t; phases.add(sandbox.menuBlinkAlpha()); }
+  check("attract prompt blinks between two shades", phases.size === 2, [...phases].join(","));
+  check("attract prompt never blinks fully out", [...phases].every((a) => a > 0), [...phases].join(","));
 }
 
 // The waiting dots have to actually cycle, or they are just a static string.
