@@ -1651,15 +1651,28 @@ function onCanvasPointerDown(evt) {
 // the pointer at all, so on a screen of several there was nothing telling you
 // which one you were about to hit, or whether a click had registered.
 //
+// The look is pixel-art arcade rather than web-app: square corners, a heavy
+// ink keyline, and a hard two-tone bevel (light along the top, shadow along
+// the bottom) instead of a soft gradient. Rounded corners and soft edges read
+// as a form control in a browser, which is the one thing the rest of this
+// screen - a chunky monospace pixel font over a cactus desert - is not.
+//
 // PRIMARY is the action the screen exists for; SUBTLE is the way out (back,
-// leave, menu) so the two never compete for attention.
+// leave, menu) so the two never compete for attention. The palette is pulled
+// from the world the buttons sit on: desert sun, cactus green, weathered
+// stone, all keylined in the same near-black ink.
 // ---------------------------------------------------------------------------
-var BUTTON_PRIMARY = { idle: [46, 96, 184], hover: [64, 124, 224], press: [32, 70, 140] };
-var BUTTON_SUBTLE = { idle: [82, 88, 102], hover: [108, 116, 134], press: [60, 65, 78] };
-var BUTTON_POSITIVE = { idle: [42, 132, 78], hover: [58, 162, 98], press: [30, 100, 58] };
+var BUTTON_PRIMARY = { idle: [216, 126, 42], hover: [244, 158, 62], press: [166, 92, 26] };
+var BUTTON_SUBTLE = { idle: [112, 102, 88], hover: [142, 130, 112], press: [82, 74, 62] };
+var BUTTON_POSITIVE = { idle: [66, 148, 74], hover: [92, 182, 98], press: [46, 110, 52] };
+
+//the keyline around every slab and panel, and the colour text is shadowed in
+var INK = [26, 22, 20];
 
 //how far the slab sits above its shadow, and how far it sinks when pressed
 var BUTTON_LIFT = 3;
+//thickness of the ink keyline drawn around the slab
+var BUTTON_EDGE = 2;
 
 // Pointer position in gameplay-strip coordinates, or null when the pointer is
 // elsewhere. Only ever set for a real mouse: a touchscreen has no hover, and
@@ -1683,22 +1696,55 @@ var pointerIsOverButton = false;
 // ---------------------------------------------------------------------------
 var OVERLAY_PANEL = { x: 300, y: 94, w: 404, h: 136 };
 
-var PANEL_TEXT = [255, 255, 255];
-var PANEL_TEXT_DIM = [162, 170, 186];
-var PANEL_GOOD = [86, 206, 130];
-var PANEL_BAD = [236, 98, 98];
+//bone white on dark ink, the way a cabinet's attract screen prints its text
+var PANEL_TEXT = [247, 241, 226];
+var PANEL_TEXT_DIM = [166, 156, 138];
+var PANEL_GOOD = [124, 204, 112];
+var PANEL_BAD = [232, 100, 82];
+var PANEL_BODY = [30, 26, 24];
 
-function drawOverlayPanel() {
+// One plate shape for every card in the game - the lobby panel, the pause
+// box, the controls hint, the muted badge. Square-cornered, ink-keylined, and
+// dropped onto a hard unblurred shadow. Each of these used to draw its own
+// rounded translucent box with its own corner radius and its own dark grey,
+// so the screens never looked like parts of the same machine.
+//
+// Everything is alpha-scaled by `fade` so a caller can animate the whole
+// plate in or out (the controls hint does) without knowing what it is made of.
+function drawInkCard(x, y, w, h, fade) {
+  var alpha = fade === undefined ? 1 : fade;
   push();
   rectMode(CENTER);
   noStroke();
-  fill(0, 0, 0, 90);
-  rect(OVERLAY_PANEL.x, OVERLAY_PANEL.y + 4, OVERLAY_PANEL.w, OVERLAY_PANEL.h, 12);
-  fill(20, 23, 32, 226);
-  rect(OVERLAY_PANEL.x, OVERLAY_PANEL.y, OVERLAY_PANEL.w, OVERLAY_PANEL.h, 12);
-  //hairline along the top edge, so the card reads as lit from above
-  fill(255, 255, 255, 26);
-  rect(OVERLAY_PANEL.x, OVERLAY_PANEL.y - OVERLAY_PANEL.h / 2 + 3, OVERLAY_PANEL.w - 16, 2, 1);
+  //hard offset shadow, no blur - a soft one would be the only soft edge here
+  fill(0, 0, 0, 90 * alpha);
+  rect(x + 4, y + 5, w, h);
+  fill(INK[0], INK[1], INK[2], 240 * alpha);
+  rect(x, y, w + 6, h + 6);
+  fill(PANEL_BODY[0], PANEL_BODY[1], PANEL_BODY[2], 236 * alpha);
+  rect(x, y, w, h);
+  pop();
+}
+
+// The lobby and result plate: drawInkCard plus a bone rule inset from the
+// edge. That rule is what makes the card read as a marquee panel rather than
+// a dialog - it catches the eye at the edges the way a cabinet bezel does, and
+// being a fixed colour it works over a bright day sky and a black night one
+// alike.
+function drawOverlayPanel() {
+  var x = OVERLAY_PANEL.x, y = OVERLAY_PANEL.y, w = OVERLAY_PANEL.w, h = OVERLAY_PANEL.h;
+  drawInkCard(x, y, w, h);
+
+  push();
+  rectMode(CENTER);
+  noStroke();
+  //four thin bars rather than an outlined rect, so the middle stays clear
+  fill(PANEL_TEXT[0], PANEL_TEXT[1], PANEL_TEXT[2], 46);
+  var inset = 7;
+  rect(x, y - h / 2 + inset, w - inset * 2, 2);
+  rect(x, y + h / 2 - inset, w - inset * 2, 2);
+  rect(x - w / 2 + inset, y, 2, h - inset * 2);
+  rect(x + w / 2 - inset, y, 2, h - inset * 2);
   pop();
 }
 
@@ -1734,21 +1780,37 @@ function drawButton(button, label, palette) {
   rectMode(CENTER);
   noStroke();
 
+  //the hole the slab sits in, still visible under it until the slab drops
   fill(0, 0, 0, 80);
-  rect(button.x, button.y + BUTTON_LIFT, button.w, button.h, 6);
+  rect(button.x, button.y + BUTTON_LIFT, button.w, button.h);
+
+  // The keyline is drawn as a slightly larger rect behind the slab rather
+  // than with stroke(): p5 strokes straddle the edge, so a 2px stroke would
+  // eat a pixel of the fill and leave the bevel bands below misaligned with
+  // the slab they are meant to sit inside.
+  fill(INK[0], INK[1], INK[2]);
+  rect(button.x, slabY, button.w + BUTTON_EDGE * 2, button.h + BUTTON_EDGE * 2);
 
   fill(shade[0], shade[1], shade[2]);
-  rect(button.x, slabY, button.w, button.h, 6);
+  rect(button.x, slabY, button.w, button.h);
 
-  //a lighter band across the top reads as a bevel and keeps the slab from
-  //looking like a flat sticker
-  fill(255, 255, 255, pressed ? 16 : 32);
-  rect(button.x, slabY - button.h / 4, button.w - 8, button.h / 2 - 3, 4);
+  //hard two-tone bevel: lit along the top, in shadow along the bottom. Both
+  //flatten when pressed, which is most of what sells the slab going down.
+  var bandHeight = Math.max(2, Math.round(button.h / 5));
+  var bandWidth = button.w - 6;
+  fill(255, 255, 255, pressed ? 18 : 46);
+  rect(button.x, slabY - button.h / 2 + bandHeight / 2 + 1, bandWidth, bandHeight);
+  fill(0, 0, 0, pressed ? 20 : 54);
+  rect(button.x, slabY + button.h / 2 - bandHeight / 2 - 1, bandWidth, bandHeight);
 
-  fill(255);
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
   textSize(10);
+  //one pixel of ink under the label, so it stays readable on the lighter
+  //hover shade without needing a second colour for it
+  fill(INK[0], INK[1], INK[2], 150);
+  text(label, button.x + 1, slabY + 2);
+  fill(255, 252, 244);
   text(label, button.x, slabY + 1);
   pop();
 }
@@ -2051,41 +2113,38 @@ function controlsHintAlpha() {
   return remaining < CONTROLS_HINT_FADE_MS ? remaining / CONTROLS_HINT_FADE_MS : 1;
 }
 
-function drawControlsHint(textShade) {
+function drawControlsHint() {
   var alpha = controlsHintAlpha();
   if (alpha <= 0) {
     return;
   }
 
-  push();
-  rectMode(CENTER);
-  noStroke();
-  fill(20, 23, 32, 200 * alpha);
-  rect(GAME_WIDTH / 2, 44, 330, 44, 8);
+  drawInkCard(GAME_WIDTH / 2, 44, 330, 44, alpha);
 
+  push();
+  noStroke();
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
   textSize(7);
   // Both control schemes are named rather than guessing from the device: a
   // touchscreen laptop is both, and guessing wrong leaves the player reading
   // instructions for hardware they do not have.
-  fill(255, 255, 255, 255 * alpha);
+  fill(PANEL_TEXT[0], PANEL_TEXT[1], PANEL_TEXT[2], 255 * alpha);
   text("SPACE / TAP TOP  -  JUMP  (HOLD TO GO HIGHER)", GAME_WIDTH / 2, 35);
   fill(PANEL_TEXT_DIM[0], PANEL_TEXT_DIM[1], PANEL_TEXT_DIM[2], 255 * alpha);
   text("DOWN / HOLD BOTTOM  -  DUCK", GAME_WIDTH / 2, 53);
   pop();
 }
 
-function drawMutedBadge(textShade) {
+function drawMutedBadge() {
+  //the same plate as every other card, just small enough to sit in a corner
+  drawInkCard(56, 20, 92, 20, 0.85);
   push();
-  rectMode(CORNER);
   noStroke();
-  fill(0, 0, 0, textShade === 255 ? 110 : 45);
-  rect(10, 10, 92, 20, 5);
   textFont('"Press Start 2P", monospace');
   textAlign(LEFT, CENTER);
   textSize(7);
-  fill(textShade);
+  panelFill(PANEL_TEXT);
   text("MUTED  (M)", 18, 21);
   pop();
 }
@@ -2097,9 +2156,12 @@ function drawPausedOverlay() {
   //dims the frozen world so the overlay is clearly a state, not a glitch
   fill(0, 0, 0, 120);
   rect(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT);
-  fill(20, 23, 32, 226);
-  rect(GAME_WIDTH / 2, 100, 260, 74, 12);
+  pop();
 
+  drawInkCard(GAME_WIDTH / 2, 100, 260, 74);
+
+  push();
+  noStroke();
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
   panelFill(PANEL_TEXT);
@@ -2951,7 +3013,7 @@ function draw() {
 
   handleMuteToggle();
   if (soundMuted) {
-    drawMutedBadge(textShade);
+    drawMutedBadge();
   }
   handlePauseToggle();
 
@@ -3064,7 +3126,7 @@ function draw() {
       drawRaceGoFlash();
       drawOpponentGoneBanner();
     }
-    drawControlsHint(textShade);
+    drawControlsHint();
 
     if(trexHitsAnyObstacle()){
         setCrouching(false);

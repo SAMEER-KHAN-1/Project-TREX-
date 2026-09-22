@@ -57,7 +57,7 @@ const sandbox = {
   createCanvas: noop, resizeCanvas: noop, frameRate: noop, background: noop,
   push: noop, pop: noop, translate: noop, noStroke: noop, stroke: noop, strokeWeight: noop,
   fill: (...a) => rects.push({ kind: "fill", a }),
-  rect: (x, y, w, h) => rects.push({ kind: "rect", x, y, w, h, fill: lastFill() }),
+  rect: (x, y, w, h, r) => rects.push({ kind: "rect", x, y, w, h, r, fill: lastFill() }),
   ellipse: noop, text: noop, textFont: noop, textAlign: noop, textSize: noop,
   image: noop, imageMode: noop, tint: noop, rectMode: noop, line: noop,
   drawSprites: noop, createSprite: makeSprite, Group: function () { return makeGroup(); },
@@ -187,6 +187,41 @@ drawsWithoutThrowing("muted badge draws at night", () => {
 });
 sandbox.soundMuted = false;
 sandbox.nightAmount = 0;
+
+// The whole UI is pixel-art arcade: square corners, ink keylines. A rounded
+// rect anywhere in it is a web form control wearing the wrong clothes, and it
+// only takes one to make the screen look like a mistake rather than a style.
+{
+  const rounded = [];
+  for (const [name, state] of screens) {
+    sandbox.gameState = state;
+    sandbox.mpRoomCode = "AB12";
+    frame();
+    for (const r of rects) {
+      if (r.kind === "rect" && r.r !== undefined) rounded.push(name + " @" + r.x + "," + r.y);
+    }
+  }
+  check("no rounded corners anywhere in the UI", rounded.length === 0, rounded.join("; "));
+}
+
+// Every card is the same plate: an ink keyline rect with the body rect drawn
+// inside it, 6px smaller in both directions. Screens used to roll their own,
+// each with a different radius and a different grey.
+{
+  const missingFrame = [];
+  const cards = [
+    ["multiplayer menu", sandbox.MULTIPLAYER_MENU, sandbox.OVERLAY_PANEL.w, sandbox.OVERLAY_PANEL.h],
+    ["paused", sandbox.PAUSED, 260, 74],
+  ];
+  for (const [name, state, w, h] of cards) {
+    sandbox.gameState = state;
+    frame();
+    const body = rects.some((r) => r.kind === "rect" && r.w === w && r.h === h);
+    const frameRect = rects.some((r) => r.kind === "rect" && r.w === w + 6 && r.h === h + 6);
+    if (!body || !frameRect) missingFrame.push(name);
+  }
+  check("every card is drawn as a keylined plate", missingFrame.length === 0, missingFrame.join("; "));
+}
 
 // The waiting dots have to actually cycle, or they are just a static string.
 const seen = new Set();
