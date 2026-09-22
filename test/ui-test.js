@@ -285,6 +285,51 @@ sandbox.nightAmount = 0;
   sandbox.nextScoreMilestone = sandbox.SCORE_MILESTONE_INTERVAL;
 }
 
+// Room code tiles. A code is read down a phone line, so each character gets
+// its own tile - as one run of big text, O/0 and I/1 are a coin toss.
+{
+  //the faces, not the shadows drawn underneath them at the same size
+  const tileFaces = () => rects.filter((r) =>
+    r.kind === "rect" && r.w === sandbox.CODE_TILE_W && r.h === sandbox.CODE_TILE_H &&
+    !(r.fill && r.fill.length === 4));
+  const isLit = (r) => JSON.stringify(r.fill) === JSON.stringify(sandbox.BUTTON_PRIMARY.idle);
+
+  sandbox.gameState = sandbox.MULTIPLAYER_WAITING;
+  sandbox.mpRoomCode = "AB12";
+  frame();
+  const faces = tileFaces();
+  check("the code gets one tile per character", faces.length === 4, String(faces.length));
+  check("every character is set on its own", ["A", "B", "1", "2"].every((c) => drewText(c)));
+  //the share link below the tiles legitimately contains the code, so this has
+  //to be an exact match rather than a substring one
+  check("the code is not also set as one word", !texts.some((t) => t.str === "AB12"));
+
+  const xs = faces.map((r) => r.x).sort((a, b) => a - b);
+  const gaps = xs.slice(1).map((x, i) => x - xs[i]);
+  check("tiles are evenly spaced", gaps.every((g) => Math.abs(g - gaps[0]) < 0.01), gaps.join(","));
+  check("the row is centred on the panel",
+    Math.abs((xs[0] + xs[3]) / 2 - sandbox.OVERLAY_PANEL.x) < 0.01, xs.join(","));
+  check("a filled code lights no tile", faces.every((r) => !isLit(r)));
+
+  // Connecting shows the same row empty, with one tile lit and travelling -
+  // the code's own shape, visibly waiting to be filled in.
+  sandbox.mpRoomCode = null;
+  const litIndexes = new Set();
+  for (let step = 0; step < 4; step++) {
+    clock += sandbox.CONNECT_TILE_STEP_MS;
+    frame();
+    const waiting = tileFaces();
+    if (waiting.length !== 4) { litIndexes.add("count:" + waiting.length); continue; }
+    const lit = waiting.filter(isLit);
+    if (lit.length !== 1) { litIndexes.add("lit:" + lit.length); continue; }
+    litIndexes.add(waiting.map((r) => r.x).sort((a, b) => a - b).indexOf(lit[0].x));
+  }
+  check("connecting lights exactly one tile at a time", ![...litIndexes].some((v) => typeof v === "string"),
+    [...litIndexes].join(","));
+  check("the lit tile travels along the row", litIndexes.size === 4, [...litIndexes].join(","));
+  sandbox.mpRoomCode = "AB12";
+}
+
 // The menu is an attract screen: the world runs behind it. It must run
 // without touching anything a real run counts, and it must stop the moment
 // the player leaves for a screen that shows a still world.

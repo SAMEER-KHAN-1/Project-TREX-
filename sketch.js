@@ -1908,6 +1908,82 @@ function drawMenuScreen() {
   pop();
 }
 
+// ---------------------------------------------------------------------------
+// Room code tiles
+//
+// The code is the one thing on this screen that gets read out loud down a
+// phone line, so it is set as four separate split-flap tiles rather than as a
+// four-character word. Separating the characters is what makes a code
+// readable: as one run of large text, O/0 and I/1 are a coin toss, and a
+// listener has no idea where one character ends and the next begins. A tile
+// each, with a seam across the middle, says "these are four symbols" before
+// anyone has read one of them.
+//
+// The same tile row doubles as the connecting indicator, with one tile lit and
+// travelling along the row - so the wait for a code and the code itself are
+// the same object filling up, rather than two unrelated screens.
+// ---------------------------------------------------------------------------
+var CODE_TILE_W = 40;
+var CODE_TILE_H = 46;
+var CODE_TILE_GAP = 8;
+var CODE_TILE_FACE = [14, 12, 11];
+//how long each tile stays lit as the connecting light travels the row
+var CONNECT_TILE_STEP_MS = 220;
+
+function codeTileX(index, count, centerX) {
+  var total = count * CODE_TILE_W + (count - 1) * CODE_TILE_GAP;
+  return centerX - total / 2 + CODE_TILE_W / 2 + index * (CODE_TILE_W + CODE_TILE_GAP);
+}
+
+function drawCodeTile(x, y, character, lit) {
+  push();
+  rectMode(CENTER);
+  noStroke();
+
+  fill(0, 0, 0, 70);
+  rect(x + 2, y + 3, CODE_TILE_W, CODE_TILE_H);
+  fill(INK[0], INK[1], INK[2]);
+  rect(x, y, CODE_TILE_W + 4, CODE_TILE_H + 4);
+  if (lit) {
+    fill(BUTTON_PRIMARY.idle[0], BUTTON_PRIMARY.idle[1], BUTTON_PRIMARY.idle[2]);
+  } else {
+    fill(CODE_TILE_FACE[0], CODE_TILE_FACE[1], CODE_TILE_FACE[2]);
+  }
+  rect(x, y, CODE_TILE_W, CODE_TILE_H);
+
+  //lit band along the top, so the tile face is not a flat black hole
+  fill(255, 255, 255, lit ? 50 : 20);
+  rect(x, y - CODE_TILE_H / 2 + 6, CODE_TILE_W - 6, 8);
+  //the seam a split-flap tile hinges on, and the thing that stops four of
+  //these reading as one long black bar
+  fill(0, 0, 0, 110);
+  rect(x, y, CODE_TILE_W, 2);
+
+  if (character) {
+    textFont('"Press Start 2P", monospace');
+    textAlign(CENTER, CENTER);
+    textSize(24);
+    panelFill(PANEL_TEXT);
+    text(character, x, y);
+  }
+  pop();
+}
+
+function drawRoomCodeTiles(code, centerX, centerY) {
+  for (var i = 0; i < code.length; i++) {
+    drawCodeTile(codeTileX(i, code.length, centerX), centerY, code.charAt(i), false);
+  }
+}
+
+//an empty row with one tile lit, walking left to right - the code's own shape,
+//visibly waiting to be filled in
+function drawConnectingTiles(centerX, centerY) {
+  var lit = Math.floor(millis() / CONNECT_TILE_STEP_MS) % 4;
+  for (var i = 0; i < 4; i++) {
+    drawCodeTile(codeTileX(i, 4, centerX), centerY, "", i === lit);
+  }
+}
+
 function drawMultiplayerMenuScreen() {
   drawOverlayPanel();
   beginPanelText();
@@ -1918,6 +1994,13 @@ function drawMultiplayerMenuScreen() {
     textSize(8);
     panelFill(PANEL_BAD);
     text(mpConnectionMessage, GAME_WIDTH / 2, 66);
+  } else {
+    //without this the screen was two verbs and no explanation of which one
+    //each player is meant to pick
+    textSize(7);
+    panelFill(PANEL_TEXT_DIM);
+    text("ONE DEVICE CREATES A ROOM", GAME_WIDTH / 2, 60);
+    text("THE OTHER JOINS WITH ITS CODE", GAME_WIDTH / 2, 72);
   }
   pop();
 
@@ -1931,38 +2014,42 @@ function drawMultiplayerWaitingScreen() {
   beginPanelText();
 
   if (!mpRoomCode) {
-    panelFill(PANEL_TEXT);
-    textSize(12);
-    text("CONNECTING" + waitingDots(), GAME_WIDTH / 2, 86);
+    panelFill(PANEL_TEXT_DIM);
+    textSize(8);
+    text("CONNECTING" + waitingDots(), GAME_WIDTH / 2, 46);
+    pop();
+    //the empty code row, so the wait visibly belongs to the code that follows
+    drawConnectingTiles(GAME_WIDTH / 2, 82);
+    beginPanelText();
     var note = mpConnectingNote();
     if (note) {
       panelFill(PANEL_TEXT_DIM);
       textSize(7);
-      text(note, GAME_WIDTH / 2, 110);
-      text("THIS CAN TAKE UP TO A MINUTE", GAME_WIDTH / 2, 124);
+      text(note, GAME_WIDTH / 2, 120);
+      text("THIS CAN TAKE UP TO A MINUTE", GAME_WIDTH / 2, 134);
     }
   } else {
     panelFill(PANEL_TEXT_DIM);
     textSize(8);
-    text("ROOM CODE", GAME_WIDTH / 2, 48);
-    //the code is the one thing being read aloud, so it gets the space
-    panelFill(PANEL_TEXT);
-    textSize(26);
-    text(mpRoomCode, GAME_WIDTH / 2, 76);
+    text("ROOM CODE", GAME_WIDTH / 2, 46);
+    pop();
+    //one tile per character - see drawRoomCodeTiles()
+    drawRoomCodeTiles(mpRoomCode, GAME_WIDTH / 2, 82);
+    beginPanelText();
     panelFill(PANEL_TEXT_DIM);
     textSize(8);
-    text("WAITING FOR OPPONENT" + waitingDots(), GAME_WIDTH / 2, 104);
+    text("WAITING FOR OPPONENT" + waitingDots(), GAME_WIDTH / 2, 120);
 
     var shareUrl = roomShareUrl(mpRoomCode);
     if (shareUrl) {
       if (millis() < shareCopiedUntilMillis) {
         panelFill(PANEL_GOOD);
         textSize(9);
-        text("LINK COPIED", GAME_WIDTH / 2, 132);
+        text("LINK COPIED", GAME_WIDTH / 2, 140);
       } else {
         panelFill(PANEL_TEXT_DIM);
         textSize(6);
-        text(shareUrl, GAME_WIDTH / 2, 132);
+        text(shareUrl, GAME_WIDTH / 2, 140);
       }
     }
   }
@@ -2376,21 +2463,24 @@ function createRoomCodeInput() {
   roomCodeInputElt.style.fontFamily = '"Press Start 2P", monospace';
   roomCodeInputElt.style.boxSizing = "border-box";
   roomCodeInputElt.style.textTransform = "uppercase";
-  // Themed to match the dark panel it now sits on - a default white field
-  // looked like a stray browser control pasted over the game.
-  roomCodeInputElt.style.background = "#0e1018";
-  roomCodeInputElt.style.color = "#ffffff";
-  roomCodeInputElt.style.caretColor = "#5c9dff";
-  roomCodeInputElt.style.border = "2px solid #3c4252";
-  roomCodeInputElt.style.borderRadius = "6px";
+  // Themed to match the tile row the waiting screen shows the code on, so the
+  // field you type a code into and the tiles you read one off are visibly the
+  // same slot. Square-cornered for the same reason nothing else here is
+  // rounded - a radius is what makes it look like a browser control pasted
+  // over the game.
+  roomCodeInputElt.style.background = "#0e0c0b";
+  roomCodeInputElt.style.color = "#f7f1e2";
+  roomCodeInputElt.style.caretColor = "#f49e3e";
+  roomCodeInputElt.style.border = "3px solid #1a1614";
+  roomCodeInputElt.style.borderRadius = "0";
   roomCodeInputElt.style.outline = "none";
 
   //a visible focus ring, since the field is the only thing to do on that screen
   roomCodeInputElt.addEventListener("focus", function () {
-    roomCodeInputElt.style.border = "2px solid #5c9dff";
+    roomCodeInputElt.style.border = "3px solid #f49e3e";
   });
   roomCodeInputElt.addEventListener("blur", function () {
-    roomCodeInputElt.style.border = "2px solid #3c4252";
+    roomCodeInputElt.style.border = "3px solid #1a1614";
   });
 
   //only letters/digits, uppercased, capped at 4 chars - matches the room
