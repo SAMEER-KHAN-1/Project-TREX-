@@ -455,6 +455,13 @@ var highScore = readHighScore();
 // a no-op unless there is genuinely something new to store.
 var savedHighScore = highScore;
 
+// The record as it stood when this run began, which is what "have I beaten my
+// best?" actually means. It cannot be read off savedHighScore: persisting is
+// wired to visibilitychange and pagehide, so tabbing away mid-run writes the
+// new best to storage and savedHighScore catches up with it - and the badge
+// saying you had beaten it would vanish on coming back.
+var runStartHighScore = highScore;
+
 function persistHighScore() {
   if (highScore <= savedHighScore) {
     return;
@@ -2849,6 +2856,98 @@ var NIGHT_MODE_SCORE_INTERVAL = 700;
 var SCORE_MILESTONE_INTERVAL = 100;
 var nextScoreMilestone = SCORE_MILESTONE_INTERVAL;
 
+//every hundred already plays a blip; this is the same event made visible, so
+//the milestone lands for a player with the sound off too
+var SCORE_FLASH_MS = 420;
+var scoreFlashStartMillis = -1;
+
+function scoreFlashStrength() {
+  if (scoreFlashStartMillis < 0) {
+    return 0;
+  }
+  var elapsed = millis() - scoreFlashStartMillis;
+  return elapsed >= SCORE_FLASH_MS ? 0 : 1 - elapsed / SCORE_FLASH_MS;
+}
+
+// ---------------------------------------------------------------------------
+// Score HUD
+//
+// Every character in "Press Start 2P" advances exactly one em, so a string's
+// width is its length times the text size - no textWidth() call needed to
+// size the plate it sits on. Monospace was already load-bearing here for a
+// different reason: with a proportional font the right-aligned score visibly
+// shifted left and right every time a digit changed.
+// ---------------------------------------------------------------------------
+var HUD_HI_SIZE = 8;
+var HUD_SCORE_SIZE = 16;
+var HUD_PAD_X = 12;
+var HUD_PAD_Y = 8;
+
+function pixelTextWidth(str, size) {
+  return str.length * size;
+}
+
+//the live score only means anything once a run has started, and on the menu
+//and in the lobby it is always five zeros - a number with nothing behind it
+function hudShowsLiveScore() {
+  return gameState === PLAY || gameState === END || gameState === PAUSED;
+}
+
+// Drawn on the same ink plate as every other card rather than as bare text
+// recoloured between black and white at the day/night midpoint. The plate is
+// what lets the digits keep one colour: they no longer have to survive both a
+// pale blue sky and a near-black one.
+//
+// Pinned to the real screen corner, not to the 600x200 strip, so it stays in
+// the top-right border regardless of how much extra sky the screen's shape
+// adds above the strip.
+function drawScoreHud() {
+  var showLive = hudShowsLiveScore();
+  var beatenBest = runStartHighScore > 0 && Math.floor(score) > runStartHighScore;
+  var topLine = beatenBest ? "NEW BEST" : "HI " + padScore(highScore);
+  var scoreLine = padScore(score);
+
+  var contentWidth = Math.max(
+    pixelTextWidth(topLine, HUD_HI_SIZE),
+    showLive ? pixelTextWidth(scoreLine, HUD_SCORE_SIZE) : 0);
+  var contentHeight = showLive ? HUD_HI_SIZE + HUD_SCORE_SIZE + 6 : HUD_HI_SIZE;
+  var plateWidth = contentWidth + HUD_PAD_X * 2;
+  var plateHeight = contentHeight + HUD_PAD_Y * 2;
+  var right = width - SCORE_MARGIN;
+  var centerX = right - plateWidth / 2;
+  var top = SCORE_MARGIN;
+
+  drawInkCard(centerX, top + plateHeight / 2, plateWidth, plateHeight, 0.9);
+
+  push();
+  noStroke();
+  textFont('"Press Start 2P", monospace');
+  textAlign(RIGHT, TOP);
+  var textRight = right - HUD_PAD_X;
+
+  textSize(HUD_HI_SIZE);
+  if (beatenBest) {
+    fill(BUTTON_PRIMARY.hover[0], BUTTON_PRIMARY.hover[1], BUTTON_PRIMARY.hover[2], menuBlinkAlpha());
+  } else {
+    panelFill(PANEL_TEXT_DIM);
+  }
+  text(topLine, textRight, top + HUD_PAD_Y);
+
+  if (showLive) {
+    textSize(HUD_SCORE_SIZE);
+    // A milestone tints the digits towards the marquee amber and fades back
+    // over SCORE_FLASH_MS, so passing a hundred is something you see and not
+    // only something you hear.
+    var flash = scoreFlashStrength();
+    fill(
+      PANEL_TEXT[0] + (BUTTON_PRIMARY.hover[0] - PANEL_TEXT[0]) * flash,
+      PANEL_TEXT[1] + (BUTTON_PRIMARY.hover[1] - PANEL_TEXT[1]) * flash,
+      PANEL_TEXT[2] + (BUTTON_PRIMARY.hover[2] - PANEL_TEXT[2]) * flash);
+    text(scoreLine, textRight, top + HUD_PAD_Y + HUD_HI_SIZE + 6);
+  }
+  pop();
+}
+
 function isNightMode() {
   return Math.floor(score / NIGHT_MODE_SCORE_INTERVAL) % 2 === 1;
 }
@@ -3050,13 +3149,7 @@ function draw() {
   if (inRaceView()) {
     drawRaceScoreboard(textShade);
   } else {
-    push();
-    textFont('"Press Start 2P", monospace');
-    textAlign(RIGHT, TOP);
-    textSize(16);
-    fill(textShade);
-    text("HI " + padScore(highScore) + "   " + padScore(score), width - SCORE_MARGIN, SCORE_MARGIN);
-    pop();
+    drawScoreHud();
   }
 
   // Everything from here down to drawSprites() is drawn in gameplay-strip
@@ -3080,6 +3173,7 @@ function draw() {
     }
     if (score >= nextScoreMilestone) {
       playScoreMilestoneSound();
+      scoreFlashStartMillis = millis();
       nextScoreMilestone += SCORE_MILESTONE_INTERVAL;
     }
     ground.velocityX = -currentSpeed() * dtFactor;
@@ -3620,6 +3714,8 @@ function spawnObstacles() {
 function resetGame(targetState) {
   gameState = targetState;
   runStartedMillis = millis();
+  runStartHighScore = highScore;
+  scoreFlashStartMillis = -1;
   restartRequested = false;
   gameOver.visible = false;
   restart.visible = false;

@@ -10,6 +10,8 @@ function check(label, ok, extra) { if (!ok) failures++; console.log(label.padEnd
 
 let clock = 0;
 const rects = [];
+const texts = [];
+let currentTextSize = 12;
 const canvasStyle = {};
 const listeners = {};
 
@@ -61,7 +63,9 @@ const sandbox = {
   push: noop, pop: noop, translate: noop, noStroke: noop, stroke: noop, strokeWeight: noop,
   fill: (...a) => rects.push({ kind: "fill", a }),
   rect: (x, y, w, h, r) => rects.push({ kind: "rect", x, y, w, h, r, fill: lastFill() }),
-  ellipse: noop, text: noop, textFont: noop, textAlign: noop, textSize: noop,
+  ellipse: noop,
+  text: (str, x, y) => texts.push({ str: String(str), x, y, size: currentTextSize, fill: lastFill() }),
+  textFont: noop, textAlign: noop, textSize: (n) => { currentTextSize = n; },
   image: noop, imageMode: noop, tint: noop, rectMode: noop, line: noop,
   drawSprites: noop, createSprite: makeSprite, Group: function () { return makeGroup(); },
   CENTER: "c", RIGHT: "r", TOP: "t", LEFT: "l", BOTTOM: "b", CORNER: "corner", CLOSE: "close",
@@ -84,7 +88,8 @@ sandbox.setup();
 sandbox.trex.addAnimation("running", fakeImage("trex", 89, 94));
 sandbox.trex.scale = 0.5;
 
-function frame() { clock += 16; rects.length = 0; sandbox.draw(); }
+function frame() { clock += 16; rects.length = 0; texts.length = 0; sandbox.draw(); }
+const drewText = (needle) => texts.some((t) => t.str.indexOf(needle) !== -1);
 // The canvas is 600x200 here, so strip coords and client coords line up.
 const at = (b) => ({ clientX: b.x, clientY: b.y, pointerType: "mouse" });
 
@@ -224,6 +229,60 @@ sandbox.nightAmount = 0;
     if (!body || !frameRect) missingFrame.push(name);
   }
   check("every card is drawn as a keylined plate", missingFrame.length === 0, missingFrame.join("; "));
+}
+
+// Score HUD. The live score is five zeros on every screen that has no run
+// behind it, which is a number saying nothing - it is only shown once there
+// is a run to count.
+{
+  //the screens loop above leaves a race in progress, and a race replaces this
+  //HUD outright - see inRaceView()
+  sandbox.mpIsRacing = false;
+  sandbox.gameState = sandbox.MENU;
+  sandbox.highScore = 1234;
+  sandbox.runStartHighScore = 1234;
+  sandbox.score = 0;
+  frame();
+  check("menu HUD shows the record", drewText("HI 01234"));
+  check("menu HUD hides the empty live score", !drewText("00000"));
+
+  sandbox.gameState = sandbox.PLAY;
+  sandbox.score = 42;
+  frame();
+  check("playing HUD shows the record", drewText("HI 01234"));
+  check("playing HUD shows the live score", drewText("00042"));
+
+  // Beating the record swaps the label. The record itself is already climbing
+  // live at this point, so the badge cannot be driven off highScore.
+  sandbox.score = 1300;
+  sandbox.highScore = 1300;
+  frame();
+  check("beating the record is called out", drewText("NEW BEST"));
+  check("the beaten record line is replaced", !drewText("HI 01300"));
+
+  // Tabbing away mid-run persists the new best, which used to be the only
+  // record of where the run started - the badge would disappear on return.
+  sandbox.persistHighScore();
+  frame();
+  check("the badge survives a mid-run save", drewText("NEW BEST"));
+
+  // A first-ever run has no record to beat, so nothing is being called out.
+  sandbox.runStartHighScore = 0;
+  frame();
+  check("a first run claims no record", !drewText("NEW BEST"));
+}
+
+// Passing a hundred is audible; it has to be visible too, for anyone playing
+// with the sound off.
+{
+  sandbox.gameState = sandbox.PLAY;
+  sandbox.score = 0;
+  sandbox.nextScoreMilestone = 1;
+  clock += 16; sandbox.draw();
+  check("a milestone starts a flash", sandbox.scoreFlashStrength() > 0, String(sandbox.scoreFlashStrength()));
+  clock += sandbox.SCORE_FLASH_MS;
+  check("the flash fades out", sandbox.scoreFlashStrength() === 0, String(sandbox.scoreFlashStrength()));
+  sandbox.nextScoreMilestone = sandbox.SCORE_MILESTONE_INTERVAL;
 }
 
 // The menu is an attract screen: the world runs behind it. It must run
