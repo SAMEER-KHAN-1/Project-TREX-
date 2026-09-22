@@ -997,15 +997,72 @@ function inRaceView() {
          gameState === MULTIPLAYER_RESULT;
 }
 
-function drawRaceScoreboard(textShade) {
+// The lead, as a bar rather than only as a number. A signed integer tells you
+// the gap but not how big a gap that is - "+40" means nothing until you have
+// played enough races to know. A needle sitting a little right of centre says
+// "just ahead" at a glance, without being read.
+//
+// The bar saturates at RACE_GAUGE_FULL_LEAD because the interesting range is
+// the close one: beyond a couple of hundred points the race is decided, and
+// scaling to the largest gap seen would flatten every close finish into a
+// twitch around the middle.
+var RACE_GAUGE_FULL_LEAD = 150;
+
+function drawLeadGauge(centerX, centerY, w, h, lead) {
+  var fraction = constrain(lead / RACE_GAUGE_FULL_LEAD, -1, 1);
   push();
+  rectMode(CENTER);
+  noStroke();
+  fill(INK[0], INK[1], INK[2]);
+  rect(centerX, centerY, w + 4, h + 4);
+  fill(CODE_TILE_FACE[0], CODE_TILE_FACE[1], CODE_TILE_FACE[2]);
+  rect(centerX, centerY, w, h);
+
+  var reach = Math.abs(fraction) * (w / 2);
+  if (reach > 0) {
+    var rgb = fraction > 0 ? PANEL_GOOD : PANEL_BAD;
+    fill(rgb[0], rgb[1], rgb[2]);
+    rect(centerX + (fraction > 0 ? reach / 2 : -reach / 2), centerY, reach, h);
+  }
+
+  //the centre mark, so a small lead reads as a small lead and not as "ahead"
+  fill(PANEL_TEXT[0], PANEL_TEXT[1], PANEL_TEXT[2], 150);
+  rect(centerX, centerY, 2, h + 2);
+  pop();
+}
+
+var RACE_HUD_LABEL_SIZE = 8;
+var RACE_HUD_SCORE_SIZE = 13;
+var RACE_HUD_GAUGE_W = 130;
+var RACE_HUD_GAUGE_H = 8;
+
+// On the same ink plate as the solo HUD, for the same reason: these digits
+// used to be drawn in whatever colour the day/night fade had settled on, and
+// the opponent's ghost-blue in particular had to survive both a pale sky and
+// a near-black one. On a plate it only has to survive the plate.
+function drawRaceScoreboard() {
+  var showGauge = mpOpponentLiveScore !== null && !mpOpponentLeft;
+  var plateWidth = RACE_HUD_GAUGE_W + HUD_PAD_X * 2;
+  var contentHeight = RACE_HUD_SCORE_SIZE * 2 + 6 +
+                      (showGauge ? RACE_HUD_GAUGE_H + RACE_HUD_LABEL_SIZE + 12 : 0);
+  var plateHeight = contentHeight + HUD_PAD_Y * 2;
+  var right = width - SCORE_MARGIN;
+  var centerX = right - plateWidth / 2;
+  var top = SCORE_MARGIN;
+
+  drawInkCard(centerX, top + plateHeight / 2, plateWidth, plateHeight, 0.9);
+
+  push();
+  noStroke();
   textFont('"Press Start 2P", monospace');
   textAlign(RIGHT, TOP);
-  textSize(14);
+  var textRight = right - HUD_PAD_X;
+  var rowY = top + HUD_PAD_Y;
 
-  var right = width - SCORE_MARGIN;
-  fill(textShade);
-  text("YOU  " + padScore(score), right, SCORE_MARGIN);
+  textSize(RACE_HUD_SCORE_SIZE);
+  panelFill(PANEL_TEXT);
+  text("YOU  " + padScore(score), textRight, rowY);
+  rowY += RACE_HUD_SCORE_SIZE + 6;
 
   // Once they have crashed their score stops being a moving target and starts
   // being a finish line, so it says so. A forfeit is the exception: there is
@@ -1014,27 +1071,32 @@ function drawRaceScoreboard(textShade) {
   var theirScore = mpOpponentLiveScore === null ? 0 : mpOpponentLiveScore;
   fill(GHOST_TINT[0], GHOST_TINT[1], GHOST_TINT[2]);
   if (mpOpponentLeft) {
-    text("THEM  LEFT", right, SCORE_MARGIN + 20);
+    text("THEM  LEFT", textRight, rowY);
   } else {
-    text((mpOpponentFinished ? "BEAT " : "THEM ") + padScore(theirScore), right, SCORE_MARGIN + 20);
+    text((mpOpponentFinished ? "BEAT " : "THEM ") + padScore(theirScore), textRight, rowY);
   }
+  rowY += RACE_HUD_SCORE_SIZE + 8;
 
   // The gap, which is the only number either player is actually tracking.
-  // Suppressed before the opponent has reported anything, so it doesn't flash
+  // Suppressed before the opponent has reported anything, so it doesn't show
   // a meaningless lead during the countdown - and after a forfeit, when the
   // gap would grow against a number that stopped moving when they quit.
-  if (mpOpponentLiveScore !== null && !mpOpponentLeft) {
+  if (showGauge) {
     var lead = Math.floor(score) - theirScore;
-    textSize(11);
+    drawLeadGauge(centerX, rowY + RACE_HUD_GAUGE_H / 2, RACE_HUD_GAUGE_W, RACE_HUD_GAUGE_H, lead);
+    rowY += RACE_HUD_GAUGE_H + 6;
+
+    textAlign(CENTER, TOP);
+    textSize(RACE_HUD_LABEL_SIZE);
     if (lead > 0) {
-      fill(60, 160, 90);
-      text("+" + lead, right, SCORE_MARGIN + 40);
+      panelFill(PANEL_GOOD);
+      text("+" + lead + " AHEAD", centerX, rowY);
     } else if (lead < 0) {
-      fill(200, 60, 60);
-      text(String(lead), right, SCORE_MARGIN + 40);
+      panelFill(PANEL_BAD);
+      text(lead + " BEHIND", centerX, rowY);
     } else {
-      fill(textShade);
-      text("LEVEL", right, SCORE_MARGIN + 40);
+      panelFill(PANEL_TEXT_DIM);
+      text("LEVEL", centerX, rowY);
     }
   }
   pop();
@@ -1044,7 +1106,12 @@ function drawOpponentGoneBanner() {
   if (millis() > mpOpponentGoneBannerUntil) {
     return;
   }
+  //on a plate, because this lands mid-run over whatever the world happens to
+  //be showing - a cactus, the ground line, a sky halfway through a night fade
+  drawInkCard(GAME_WIDTH / 2, 50, 344, 52);
+
   push();
+  noStroke();
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
 
@@ -1052,17 +1119,17 @@ function drawOpponentGoneBanner() {
   // the ghost that just vanished from beside them left rather than died, and
   // that there is no longer a score to chase.
   if (mpOpponentLeft) {
-    fill(200, 60, 60);
+    panelFill(PANEL_BAD);
     textSize(13);
     text("OPPONENT LEFT", GAME_WIDTH / 2, 40);
-    fill(60, 160, 90);
+    panelFill(PANEL_GOOD);
     textSize(9);
-    text("RACE WON - FINISH YOUR RUN", GAME_WIDTH / 2, 60);
+    text("RACE WON - FINISH YOUR RUN", GAME_WIDTH / 2, 62);
     pop();
     return;
   }
 
-  fill(200, 60, 60);
+  panelFill(PANEL_BAD);
   textSize(13);
   text("OPPONENT CRASHED", GAME_WIDTH / 2, 40);
 
@@ -1070,12 +1137,11 @@ function drawOpponentGoneBanner() {
   // are out, a player already ahead of their final score has won outright and
   // cannot lose it by crashing. Saying "stay alive" there would be a lie.
   textSize(9);
+  panelFill(PANEL_GOOD);
   if (Math.floor(score) > mpOpponentScore) {
-    fill(60, 160, 90);
-    text("YOU'RE AHEAD - RACE WON", GAME_WIDTH / 2, 60);
+    text("YOU'RE AHEAD - RACE WON", GAME_WIDTH / 2, 62);
   } else {
-    fill(60, 160, 90);
-    text("BEAT " + padScore(mpOpponentScore) + " TO WIN", GAME_WIDTH / 2, 60);
+    text("BEAT " + padScore(mpOpponentScore) + " TO WIN", GAME_WIDTH / 2, 62);
   }
   pop();
 }
@@ -2125,15 +2191,25 @@ function drawMultiplayerCountdownScreen() {
 var MP_GO_FLASH_MS = 700;
 
 function drawRaceGoFlash() {
-  if (millis() >= mpRaceStartMillis + MP_GO_FLASH_MS) {
+  var elapsed = millis() - mpRaceStartMillis;
+  if (elapsed < 0 || elapsed >= MP_GO_FLASH_MS) {
     return;
   }
+  // Swells and fades rather than appearing and vanishing at full strength.
+  // The fade is squared so it holds near-solid for the first half and then
+  // clears quickly - the word has to be gone before the first cactus needs
+  // looking at, but not so briefly that it reads as a flicker.
+  var progress = elapsed / MP_GO_FLASH_MS;
+  var alpha = 255 * (1 - progress * progress);
+
   push();
   textFont('"Press Start 2P", monospace');
   textAlign(CENTER, CENTER);
-  fill(60, 160, 90);
-  textSize(30);
-  text("GO!", GAME_WIDTH / 2, 60);
+  textSize(30 + 16 * progress);
+  fill(INK[0], INK[1], INK[2], alpha);
+  text("GO!", GAME_WIDTH / 2 + 3, 62 + 3);
+  fill(PANEL_GOOD[0], PANEL_GOOD[1], PANEL_GOOD[2], alpha);
+  text("GO!", GAME_WIDTH / 2, 62);
   pop();
 }
 
@@ -3237,7 +3313,7 @@ function draw() {
   // every time a digit changed. Every character in a monospace font has the
   // same advance width, so that can't happen here.
   if (inRaceView()) {
-    drawRaceScoreboard(textShade);
+    drawRaceScoreboard();
   } else {
     drawScoreHud();
   }

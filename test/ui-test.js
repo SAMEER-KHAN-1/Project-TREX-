@@ -285,6 +285,63 @@ sandbox.nightAmount = 0;
   sandbox.nextScoreMilestone = sandbox.SCORE_MILESTONE_INTERVAL;
 }
 
+// Race lead gauge. A signed integer tells you the gap but not how big a gap
+// that is; a needle off centre says "just ahead" without being read.
+{
+  const H = sandbox.RACE_HUD_GAUGE_H;
+  const W = sandbox.RACE_HUD_GAUGE_W;
+  const track = () => rects.find((r) => r.kind === "rect" && r.h === H && r.w === W);
+  const bar = () => rects.find((r) => r.kind === "rect" && r.h === H && r.w !== W && r.w > 0 &&
+    (JSON.stringify(r.fill) === JSON.stringify(sandbox.PANEL_GOOD) ||
+     JSON.stringify(r.fill) === JSON.stringify(sandbox.PANEL_BAD)));
+
+  function race(selfScore, theirScore, opts) {
+    sandbox.mpIsRacing = true;
+    sandbox.gameState = sandbox.PLAY;
+    sandbox.mpOpponentLeft = (opts && opts.left) || false;
+    sandbox.mpOpponentFinished = false;
+    sandbox.mpOpponentLiveScore = theirScore;
+    sandbox.score = selfScore;
+    frame();
+  }
+
+  race(500, 500);
+  check("a level race draws the gauge track", !!track());
+  check("a level race fills neither side", !bar());
+  check("a level race says so", drewText("LEVEL"));
+
+  race(560, 500);
+  const ahead = bar();
+  check("being ahead fills the gauge", !!ahead);
+  check("ahead fills to the right of centre", ahead && ahead.x > track().x, ahead && String(ahead.x));
+  check("ahead fills green", ahead && JSON.stringify(ahead.fill) === JSON.stringify(sandbox.PANEL_GOOD));
+  check("ahead is also stated", drewText("+60 AHEAD"));
+
+  race(440, 500);
+  const behind = bar();
+  check("behind fills to the left of centre", behind && behind.x < track().x, behind && String(behind.x));
+  check("behind fills red", behind && JSON.stringify(behind.fill) === JSON.stringify(sandbox.PANEL_BAD));
+  check("behind is also stated", drewText("-60 BEHIND"));
+
+  // The bar has to stop at the end of its track rather than growing past it.
+  race(500 + sandbox.RACE_GAUGE_FULL_LEAD * 8, 500);
+  const pinned = bar();
+  check("a runaway lead pins the gauge at full", pinned && Math.abs(pinned.w - W / 2) < 0.01,
+    pinned && String(pinned.w));
+
+  // Before the opponent has reported anything there is no gap to show, and
+  // after a forfeit the gap grows against a number that stopped moving.
+  race(500, null);
+  check("no gauge before the opponent reports", !track());
+  race(500, 400, { left: true });
+  check("no gauge after a forfeit", !track());
+  check("a forfeit is stated instead", drewText("THEM  LEFT"));
+
+  sandbox.mpIsRacing = false;
+  sandbox.mpOpponentLeft = false;
+  sandbox.mpOpponentLiveScore = null;
+}
+
 // Room code tiles. A code is read down a phone line, so each character gets
 // its own tile - as one run of big text, O/0 and I/1 are a coin toss.
 {
