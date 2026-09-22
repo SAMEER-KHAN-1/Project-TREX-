@@ -491,8 +491,13 @@ if (typeof window !== "undefined" && window.addEventListener) {
 // and touch, so re-querying the DOM each time was needless work.
 var gameCanvasElt = null;
 
+// Re-queried whenever the cached node has left the document. p5 replaces the
+// canvas outright in some resize/renderer paths, and a handler still holding
+// the detached one measures a box that is no longer on screen - every
+// getBoundingClientRect() on a detached element reads 0, which silently turns
+// every click into a miss.
 function canvasElement() {
-  if (!gameCanvasElt) {
+  if (!gameCanvasElt || (gameCanvasElt.isConnected === false)) {
     gameCanvasElt = document.querySelector("canvas");
   }
   return gameCanvasElt;
@@ -622,12 +627,19 @@ function canvasPointerToGame(evt) {
   if (!rect.width || !rect.height) {
     return null;
   }
-  //width/height are the (possibly taller than 200) canvas; viewOffsetY is
-  //where the gameplay strip sits inside it - see fillScreen()
-  return {
+  //width/height are the (possibly taller than 200) canvas; the strip offset
+  //is where the gameplay strip sits inside it - see fillScreen()
+  var point = {
     x: (evt.clientX - rect.left) * (width / rect.width),
     y: (evt.clientY - rect.top) * (height / rect.height) - viewOffsetY
   };
+  //a detached or zero-sized canvas, or a resize landing mid-event, can make
+  //these NaN - and every comparison against NaN is false, so a bad point
+  //silently becomes "nothing is clickable" rather than an obvious failure
+  if (!isFinite(point.x) || !isFinite(point.y)) {
+    return null;
+  }
+  return point;
 }
 
 function isOverRestart(x, y) {
@@ -1474,9 +1486,18 @@ var MULTIPLAYER_JOIN_SUBMIT_BUTTON = { x: 300, y: 140, w: 160, h: 30 };
 //below the restart icon (centered at 300,140, ~32px tall) on the game-over screen
 var END_MENU_BUTTON = { x: 300, y: 180, w: 110, h: 24 };
 
+// How far outside the slab still counts as a hit. Vertically this is exactly
+// BUTTON_LIFT, because the slab is drawn with its shadow that far below the
+// box - without it the bottom few pixels of what the player can see are dead.
+// Horizontally there is more room to give, and no two buttons on any screen
+// sit closer than 24px apart, so a fingertip landing just off the edge is
+// read as the hit it was meant to be.
+var BUTTON_HIT_PAD_X = 6;
+var BUTTON_HIT_PAD_Y = 3;
+
 function isOverButton(button, x, y) {
-  return Math.abs(x - button.x) <= button.w / 2 &&
-         Math.abs(y - button.y) <= button.h / 2;
+  return Math.abs(x - button.x) <= button.w / 2 + BUTTON_HIT_PAD_X &&
+         Math.abs(y - button.y) <= button.h / 2 + BUTTON_HIT_PAD_Y;
 }
 
 //consumed in draw() rather than acted on immediately, same reasoning as
@@ -2122,8 +2143,37 @@ var SCORE_MARGIN = 18;
 var SKY_SHARE_OF_EXTRA_HEIGHT = 0.6;
 var viewOffsetY = 0;
 
+// The viewport, measured rather than remembered.
+//
+// p5 caches windowWidth/windowHeight and only refreshes them from inside its
+// own resize handler, so both are exactly as stale as the resize event is -
+// and that event is not dependable in the places this game runs. Entering or
+// leaving fullscreen, rotating a phone, and a mobile URL bar hiding itself all
+// change the viewport, and browsers variously coalesce, delay, or skip the
+// resize that should announce it. Reading the live values instead means a
+// missed event costs nothing: the next frame measures the real viewport and
+// lays the canvas out for it.
+//the <html> box is the fallback because a few mobile browsers report 0 for
+//window.inner* during an orientation change, mid-rotation
+var docRoot = document.documentElement || null;
+
+function viewportWidth() {
+  return window.innerWidth || (docRoot && docRoot.clientWidth) || windowWidth;
+}
+
+function viewportHeight() {
+  return window.innerHeight || (docRoot && docRoot.clientHeight) || windowHeight;
+}
+
+// What fillScreen() last laid the canvas out for, so an unchanged viewport can
+// skip both the style writes and the layout they would force - see
+// syncScreenLayout().
+var appliedLayout = { width: 0, height: 0 };
+
 function fillScreen() {
-  var viewHeight = Math.max(GAME_HEIGHT, Math.round(GAME_WIDTH * windowHeight / windowWidth));
+  var screenWidth = viewportWidth();
+  var screenHeight = viewportHeight();
+  var viewHeight = Math.max(GAME_HEIGHT, Math.round(GAME_WIDTH * screenHeight / screenWidth));
   if (width !== GAME_WIDTH || height !== viewHeight) {
     //noRedraw: this also runs from setup(), before the sprites draw() needs exist
     resizeCanvas(GAME_WIDTH, viewHeight, true);
@@ -2131,21 +2181,42 @@ function fillScreen() {
   viewOffsetY = Math.round((height - GAME_HEIGHT) * SKY_SHARE_OF_EXTRA_HEIGHT);
 
   //only a window wider than 3:1 still gets bars (at the sides)
-  var scaleFactor = Math.min(windowWidth / width, windowHeight / height);
+  var scaleFactor = Math.min(screenWidth / width, screenHeight / height);
   var cssWidth = width * scaleFactor;
   var cssHeight = height * scaleFactor;
   //rounding viewHeight can leave the fit a pixel or two short; stretch that
   //sliver rather than show a hairline of page background along one edge
-  if (Math.abs(cssWidth - windowWidth) <= scaleFactor + 1) {
-    cssWidth = windowWidth;
+  if (Math.abs(cssWidth - screenWidth) <= scaleFactor + 1) {
+    cssWidth = screenWidth;
   }
-  if (Math.abs(cssHeight - windowHeight) <= scaleFactor + 1) {
-    cssHeight = windowHeight;
+  if (Math.abs(cssHeight - screenHeight) <= scaleFactor + 1) {
+    cssHeight = screenHeight;
   }
   var canvasElt = canvasElement();
   if (canvasElt) {
     canvasElt.style.width = cssWidth + "px";
     canvasElt.style.height = cssHeight + "px";
+  }
+  appliedLayout.width = screenWidth;
+  appliedLayout.height = screenHeight;
+}
+
+// Called at the top of every frame, so the canvas is always laid out for the
+// viewport that exists right now rather than for the last one the browser
+// bothered to announce. A canvas sized for a viewport that is gone is exactly
+// the state where the strip the player is looking at and the strip the hit
+// tests are measured against stop being the same strip.
+//
+// Cheap in the normal case: it reads two numbers off window and returns, so
+// nothing is written and no relayout happens unless the viewport really moved.
+function syncScreenLayout() {
+  if (viewportWidth() === appliedLayout.width &&
+      viewportHeight() === appliedLayout.height) {
+    return;
+  }
+  fillScreen();
+  if (roomCodeInputElt && roomCodeInputElt.style.display !== "none") {
+    positionRoomCodeInput();
   }
 }
 
@@ -2801,6 +2872,9 @@ function applyPointerCursor() {
 
 function draw() {
   //trex.debug = true;
+  //before anything reads width/height/viewOffsetY, so a viewport change the
+  //browser never announced cannot leave this frame drawn to the old shape
+  syncScreenLayout();
   //recomputed from scratch each frame by whichever buttons actually draw
   pointerIsOverButton = false;
 
