@@ -1314,6 +1314,36 @@ function drawEndScreenNightOutlines() {
   drawSpriteNightOutline(restart, nightAmount);
 }
 
+// What the run was worth, said at the moment the player is looking at the
+// middle of the screen rather than only in the corner HUD. Deliberately
+// placed ABOVE the GAME OVER art and not behind it: those sprites are dark
+// pixels that are outlined in white at night precisely so they read against a
+// dark background, and dropping an ink plate under them would make them
+// invisible in daylight instead.
+function drawGameOverStats() {
+  var beatenBest = runStartHighScore > 0 && Math.floor(score) > runStartHighScore;
+  drawInkCard(GAME_WIDTH / 2, 62, 300, 42);
+
+  push();
+  noStroke();
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+
+  textSize(10);
+  panelFill(PANEL_TEXT);
+  text("SCORE " + padScore(score), GAME_WIDTH / 2, 54);
+
+  textSize(7);
+  if (beatenBest) {
+    fill(BUTTON_PRIMARY.hover[0], BUTTON_PRIMARY.hover[1], BUTTON_PRIMARY.hover[2], menuBlinkAlpha());
+    text("NEW RECORD", GAME_WIDTH / 2, 72);
+  } else {
+    panelFill(PANEL_TEXT_DIM);
+    text("BEST " + padScore(highScore), GAME_WIDTH / 2, 72);
+  }
+  pop();
+}
+
 function startRace() {
   mpResetRaceState();
   mpIsRacing = true;
@@ -1828,6 +1858,18 @@ function beginPanelText() {
   textAlign(CENTER, CENTER);
 }
 
+// A screen's verdict, set the same way the menu title is: a flat ink layer
+// under a coloured one. On a panel this dark, PANEL_BAD red on its own is
+// close to the same value as the card behind it, and the result of a race
+// should not be the hardest thing on the screen to read.
+function panelHeadline(label, y, rgb, size) {
+  textSize(size);
+  fill(INK[0], INK[1], INK[2]);
+  text(label, GAME_WIDTH / 2 + 2, y + 2);
+  panelFill(rgb);
+  text(label, GAME_WIDTH / 2, y);
+}
+
 function panelFill(rgb) {
   fill(rgb[0], rgb[1], rgb[2]);
 }
@@ -2224,9 +2266,7 @@ function drawMultiplayerResultScreen() {
   beginPanelText();
 
   if (mpConnectionLost) {
-    panelFill(PANEL_BAD);
-    textSize(13);
-    text("CONNECTION LOST", GAME_WIDTH / 2, 52);
+    panelHeadline("CONNECTION LOST", 52, PANEL_BAD, 13);
     panelFill(PANEL_TEXT_DIM);
     textSize(7);
     text("THE RACE COULD NOT BE SCORED", GAME_WIDTH / 2, 78);
@@ -2243,9 +2283,7 @@ function drawMultiplayerResultScreen() {
     textSize(8);
     text("WAITING FOR OPPONENT" + waitingDots(), GAME_WIDTH / 2, 104);
   } else if (mpOpponentLeft) {
-    panelFill(PANEL_GOOD);
-    textSize(16);
-    text("YOU WIN", GAME_WIDTH / 2, 55);
+    panelHeadline("YOU WIN", 55, PANEL_GOOD, 16);
     panelFill(PANEL_TEXT_DIM);
     textSize(7);
     text("OPPONENT LEFT THE RACE", GAME_WIDTH / 2, 82);
@@ -2255,25 +2293,28 @@ function drawMultiplayerResultScreen() {
   } else {
     var won = mpSelfScore > mpOpponentScore;
     var tied = mpSelfScore === mpOpponentScore;
-    textSize(17);
     if (tied) {
-      panelFill(PANEL_TEXT);
-      text("DEAD HEAT", GAME_WIDTH / 2, 50);
+      panelHeadline("DEAD HEAT", 48, PANEL_TEXT, 17);
     } else if (won) {
-      panelFill(PANEL_GOOD);
-      text("YOU WIN", GAME_WIDTH / 2, 50);
+      panelHeadline("YOU WIN", 48, PANEL_GOOD, 17);
     } else {
-      panelFill(PANEL_BAD);
-      text("YOU LOSE", GAME_WIDTH / 2, 50);
+      panelHeadline("YOU LOSE", 48, PANEL_BAD, 17);
     }
 
     // The winning line is highlighted rather than both being the same colour,
     // so the result is readable at a glance instead of by comparing digits.
     textSize(10);
     panelFill(won || tied ? PANEL_TEXT : PANEL_TEXT_DIM);
-    text("YOU  " + padScore(mpSelfScore), GAME_WIDTH / 2, 82);
+    text("YOU  " + padScore(mpSelfScore), GAME_WIDTH / 2, 80);
     panelFill(!won || tied ? PANEL_TEXT : PANEL_TEXT_DIM);
-    text("THEM " + padScore(mpOpponentScore), GAME_WIDTH / 2, 102);
+    text("THEM " + padScore(mpOpponentScore), GAME_WIDTH / 2, 100);
+
+    // The same gauge the race HUD ran on, frozen at the final margin. Two
+    // five-digit numbers make you subtract to find out whether it was close;
+    // the bar was already answering that question for the whole race, so it
+    // answers it once more for the result.
+    drawLeadGauge(GAME_WIDTH / 2, 122, RACE_HUD_GAUGE_W, RACE_HUD_GAUGE_H,
+                  mpSelfScore - mpOpponentScore);
   }
 
   // Rematch status sits just above the buttons: whether you are waiting on
@@ -3490,6 +3531,8 @@ function draw() {
       reset();
     }
     restartKeyWasDown = restartKeyIsDown;
+
+    drawGameOverStats();
 
     //otherwise picking Single Player was a one-way trip - there was no way
     //back to the mode-select menu (to reach Multiplayer, say) once a run

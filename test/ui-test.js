@@ -342,6 +342,66 @@ sandbox.nightAmount = 0;
   sandbox.mpOpponentLiveScore = null;
 }
 
+// Game over stats. The plate must sit ABOVE the GAME OVER art, never behind
+// it: those sprites are dark pixels outlined in white at night so they read
+// against a dark background, and ink under them would hide them in daylight.
+{
+  sandbox.mpIsRacing = false;
+  sandbox.gameState = sandbox.END;
+  sandbox.score = 820;
+  sandbox.highScore = 1450;
+  sandbox.runStartHighScore = 1450;
+  frame();
+  check("game over states the run's score", drewText("SCORE 00820"));
+  check("game over states the record", drewText("BEST 01450"));
+
+  const plate = rects.find((r) => r.kind === "rect" && r.w === 300 && r.h === 42);
+  const artTop = sandbox.gameOver.y - (sandbox.gameOver.height * sandbox.gameOver.scale) / 2;
+  check("the stats plate clears the game over art",
+    plate && plate.y + plate.h / 2 < artTop, plate && (plate.y + plate.h / 2) + " vs " + artTop);
+
+  sandbox.score = 1600;
+  sandbox.highScore = 1600;
+  frame();
+  check("a record run says so instead of repeating the best", drewText("NEW RECORD"));
+  check("the beaten best is not also shown", !drewText("BEST 01600"));
+}
+
+// Race result. The margin gauge is the race HUD's own gauge frozen at the
+// final gap - two five-digit numbers make you subtract to find out whether it
+// was close.
+{
+  const gauge = () => rects.find((r) => r.kind === "rect" &&
+    r.w === sandbox.RACE_HUD_GAUGE_W && r.h === sandbox.RACE_HUD_GAUGE_H);
+  function result(opts) {
+    sandbox.gameState = sandbox.MULTIPLAYER_RESULT;
+    //suppresses the corner race HUD's own gauge, so only the panel's is left
+    sandbox.mpOpponentLiveScore = null;
+    sandbox.mpConnectionLost = (opts && opts.lost) || false;
+    sandbox.mpOpponentLeft = (opts && opts.left) || false;
+    sandbox.mpOpponentFinished = opts && opts.pending ? false : true;
+    sandbox.mpSelfScore = (opts && opts.self) !== undefined ? opts.self : 900;
+    sandbox.mpOpponentScore = (opts && opts.them) !== undefined ? opts.them : 800;
+    frame();
+  }
+
+  result({ self: 900, them: 800 });
+  check("a decided result shows the final margin", !!gauge());
+  check("the verdict is set twice, ink under colour",
+    texts.filter((t) => t.str === "YOU WIN").length === 2,
+    String(texts.filter((t) => t.str === "YOU WIN").length));
+
+  result({ pending: true });
+  check("no margin while the opponent is still running", !gauge());
+  result({ left: true });
+  check("no margin after a forfeit", !gauge());
+  result({ lost: true });
+  check("no margin when the race could not be scored", !gauge());
+
+  sandbox.mpConnectionLost = false;
+  sandbox.mpOpponentLeft = false;
+}
+
 // Room code tiles. A code is read down a phone line, so each character gets
 // its own tile - as one run of big text, O/0 and I/1 are a coin toss.
 {
