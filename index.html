@@ -1,7 +1,26 @@
-<!DOCTYPE html><html><head>
+<!DOCTYPE html><html lang="en"><head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
     <title>T-Rex Runner</title>
+    <meta name="description" content="A pixel-art T-Rex runner with a two-player race: send a friend a link, run the same course at the same time, and watch their ghost beside you. Highest score wins.">
+    <!-- the sky's own blue, so a phone's browser bar blends into the game -->
+    <meta name="theme-color" content="#87ceeb">
+    <link rel="icon" type="image/png" href="docs/icon.png">
+    <link rel="apple-touch-icon" href="docs/icon.png">
+
+    <!-- The card a shared link unfurls into. Link previews need an absolute
+         image URL, and this page does not know where it is hosted, so the
+         server writes its own address in place of %ORIGIN% as it sends it -
+         see requestOrigin() in server/server.js. -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="T-Rex Runner - race a friend">
+    <meta property="og:description" content="Send a friend a link, run the same course at the same time, and watch their ghost beside you. Highest score wins.">
+    <meta property="og:image" content="%ORIGIN%/docs/preview.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Two pixel-art dinosaurs jumping a cactus side by side, one of them a translucent blue ghost, with a race scoreboard in the corner">
+    <meta name="twitter:card" content="summary_large_image">
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
@@ -12,6 +31,6 @@
   </head>
   <body>
       <script src="sketch.js"></script>
-  
+
 
 </body></html>

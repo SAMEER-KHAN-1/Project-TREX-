@@ -13,6 +13,7 @@
 // ---------------------------------------------------------------------------
 
 const http = require("http");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -217,6 +218,36 @@ function encoded(entry, encoding) {
   return entry[encoding];
 }
 
+// ---------------------------------------------------------------------------
+// Link previews
+//
+// A link pasted into LinkedIn, WhatsApp or Slack unfurls into a card built
+// from the page's og: tags, and the card's image has to be an absolute URL -
+// a relative one is simply dropped, leaving a bare title. The page cannot know
+// its own address: it is localhost on a laptop, a LAN IP on the phone beside
+// it, and whatever Render assigned once deployed. So index.html says %ORIGIN%
+// and the page is sent with the address it was actually asked for.
+// ---------------------------------------------------------------------------
+const ORIGIN_PLACEHOLDER = "%ORIGIN%";
+
+function requestOrigin(req) {
+  // The Host header is whatever the client chose to send, and it is about to
+  // be written into HTML - so only a bare hostname and port gets through.
+  var host = String(req.headers.host || "");
+  if (!/^[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(host)) {
+    host = "localhost:" + PORT;
+  }
+  // Render terminates https in front of this process and says so in this
+  // header; locally there is no such proxy and the page really is plain http.
+  var forwarded = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+  var scheme = forwarded === "https" ? "https" : "http";
+  return scheme + "://" + host;
+}
+
+function pageWithOrigin(raw, origin) {
+  return Buffer.from(raw.toString("utf8").split(ORIGIN_PLACEHOLDER).join(origin), "utf8");
+}
+
 function serveStaticFile(req, res) {
   //strip the query string, and decode so a name with %20 in it still resolves
   var requestPath;
@@ -253,11 +284,15 @@ function serveStaticFile(req, res) {
       return;
     }
     var ext = path.extname(filePath).toLowerCase();
+    //the page carries its own address - see requestOrigin()
+    var origin = relative === "index.html" ? requestOrigin(req) : null;
     var headers = {
       "Content-Type": CONTENT_TYPES[ext] || "application/octet-stream",
       "Cache-Control": "no-cache",
-      //weak, because the same file goes out in up to three encodings
-      "ETag": 'W/"' + stat.size.toString(16) + "-" + Math.floor(stat.mtimeMs).toString(16) + '"'
+      //weak, because the same file goes out in up to three encodings - and
+      //the page's changes with the address written into it
+      "ETag": 'W/"' + stat.size.toString(16) + "-" + Math.floor(stat.mtimeMs).toString(16) +
+              (origin ? "-" + crypto.createHash("sha1").update(origin).digest("hex").slice(0, 8) : "") + '"'
     };
     var compressible = COMPRESSIBLE_TYPES[ext] === true;
     if (compressible) {
@@ -286,6 +321,19 @@ function serveStaticFile(req, res) {
       };
       var accepted = compressible ? acceptedEncodings(req) : {};
       var encoding = accepted.br ? "br" : (accepted.gzip ? "gzip" : null);
+      if (origin) {
+        // Built per request, since the body depends on who asked. At a couple
+        // of kilobytes it costs nothing to compress on the spot, where caching
+        // it would mean keeping one copy per hostname anyone ever used.
+        var page = pageWithOrigin(entry.raw, origin);
+        if (encoding) {
+          headers["Content-Encoding"] = encoding;
+        }
+        send(encoding === "br" ? zlib.brotliCompressSync(page, BROTLI_OPTIONS)
+           : encoding === "gzip" ? zlib.gzipSync(page, GZIP_OPTIONS)
+           : page);
+        return;
+      }
       if (!encoding) {
         send(entry.raw);
         return;

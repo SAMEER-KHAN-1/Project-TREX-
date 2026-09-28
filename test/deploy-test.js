@@ -86,6 +86,8 @@ async function waitForServer(port, timeoutMs) {
       assets.push(ref.replace(/^\.\//, ""));
     }
   });
+  //the link-preview image, whose address the server fills in as it sends
+  html.replace(/content="%ORIGIN%\/([^"]+)"/g, function (_, file) { assets.push(file); });
   //the sprites are loaded from sketch.js rather than from the page
   const sketch = fs.readFileSync(path.join(ROOT, "sketch.js"), "utf8");
   sketch.replace(/load(?:Image|Animation)\(([^)]*)\)/g, function (_, args) {

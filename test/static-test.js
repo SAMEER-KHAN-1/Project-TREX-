@@ -65,8 +65,36 @@ function decode(res) {
     png.body.equals(fs.readFileSync(path.join(ROOT, "trex1.png"))));
 
   const page = await get("/", { "Accept-Encoding": "gzip, br" });
+  const pageSource = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
   check("the page itself is compressed too", page.status === 200 && !!page.headers["content-encoding"] &&
-    decode(page).equals(fs.readFileSync(path.join(ROOT, "index.html"))));
+    decode(page).toString() === pageSource.split("%ORIGIN%").join("http://127.0.0.1:" + PORT));
+
+  // --- Link previews. A pasted link unfurls into a card whose image must be
+  // an absolute URL, and the page cannot know its own address - so the server
+  // writes in the one it was asked for.
+  const html = decode(page).toString();
+  const image = /<meta property="og:image" content="([^"]+)"/.exec(html);
+  check("the preview image is an absolute URL", image && image[1] === "http://127.0.0.1:" + PORT + "/docs/preview.png",
+    image && image[1]);
+  check("no placeholder is left in the page", html.indexOf("%ORIGIN%") === -1);
+  const card = await get("/docs/preview.png");
+  check("the preview image is served", card.status === 200 && card.headers["content-type"] === "image/png" &&
+    card.body.length > 1000, card.status + " " + card.headers["content-type"]);
+
+  // Render terminates https in front of the server and says so in a header.
+  const behindProxy = decode(await get("/", { "Host": "trex.onrender.com", "X-Forwarded-Proto": "https" })).toString();
+  check("behind Render's proxy the image is https",
+    behindProxy.indexOf('content="https://trex.onrender.com/docs/preview.png"') !== -1);
+
+  // The Host header is chosen by the client and lands inside HTML.
+  const hostile = decode(await get("/", { "Host": 'x.com"><script>alert(1)</script>' })).toString();
+  check("a hostile Host header is not written into the page",
+    hostile.indexOf("<script>alert") === -1 && hostile.indexOf("http://localhost:") !== -1);
+
+  // One page per address, so the cache validator has to differ too.
+  const lanTag = (await get("/", { "Host": "192.168.1.20:8080" })).headers["etag"];
+  const localTag = (await get("/", { "Host": "localhost:8080" })).headers["etag"];
+  check("each address gets its own ETag", lanTag && localTag && lanTag !== localTag, lanTag + " vs " + localTag);
 
   // --- Revalidation: a returning player should not download the game again.
   const etag = br.headers["etag"];

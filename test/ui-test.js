@@ -882,6 +882,46 @@ for (const [label, setUp] of variants) drawsWithoutThrowing(label, setUp);
   frame();
 })();
 
+// --- The corner race scoreboard is for running. On a phone held sideways
+// there is so little sky that its plate landed on the result panel, where it
+// only repeated what the panel already says.
+(function () {
+  //the scoreboard is right-aligned against the top-right corner
+  const cornerX = sandbox.width - sandbox.SCORE_MARGIN - sandbox.HUD_PAD_X;
+  const cornerText = () => texts.filter((t) => Math.abs(t.x - cornerX) < 0.01);
+
+  sandbox.mpIsRacing = true;
+  sandbox.mpOpponentLeft = false;
+  sandbox.mpOpponentFinished = false;
+  sandbox.mpOpponentLiveScore = 300;
+  sandbox.gameState = sandbox.PLAY;
+  sandbox.trexHitsAnyObstacle = () => false;
+  frame();
+  check("the scoreboard is up while racing", cornerText().some((t) => t.str.indexOf("THEM") === 0));
+
+  sandbox.gameState = sandbox.MULTIPLAYER_COUNTDOWN;
+  sandbox.mpRaceStartMillis = clock + 2000;
+  frame();
+  check("no corner scoreboard over the countdown", cornerText().length === 0,
+    cornerText().map((t) => t.str).join(" | "));
+
+  sandbox.gameState = sandbox.MULTIPLAYER_RESULT;
+  sandbox.mpSelfScore = 250;
+  sandbox.mpOpponentLiveScore = 312;
+  frame();
+  check("no corner scoreboard over the result", cornerText().length === 0,
+    cornerText().map((t) => t.str).join(" | "));
+  // The one thing it carried there - a still-running opponent's live score -
+  // has to be on the panel instead.
+  check("the waiting panel shows their live score", drewText("THEM 00312"));
+  check("the waiting panel shows yours", drewText("YOU  00250"));
+
+  sandbox.mpIsRacing = false;
+  sandbox.mpOpponentLiveScore = null;
+  sandbox.gameState = sandbox.MENU;
+  frame();
+})();
+
 console.log("");
 console.log(failures === 0 ? "ALL PASS" : failures + " FAILED");
 process.exit(failures === 0 ? 0 : 1);

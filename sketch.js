@@ -1057,6 +1057,18 @@ function inRaceView() {
          gameState === MULTIPLAYER_RESULT;
 }
 
+// The corner scoreboard is for running. The countdown and result screens put
+// their own panel across the middle of the strip, and on a wide screen - every
+// phone held sideways - there is so little sky above the strip that the
+// scoreboard's plate landed on top of that panel. It had nothing to add there
+// anyway: during the countdown both scores are zero, and a decided result
+// panel carries both finals and the margin gauge. The one number it did carry,
+// the live score of an opponent still running after you crashed, is on the
+// panel now too.
+function raceScoreboardIsShown() {
+  return mpIsRacing && gameState === PLAY;
+}
+
 // The lead, as a bar rather than only as a number. A signed integer tells you
 // the gap but not how big a gap that is - "+40" means nothing until you have
 // played enough races to know. A needle sitting a little right of centre says
@@ -2634,12 +2646,16 @@ function drawMultiplayerResultScreen() {
   } else if (!mpOpponentFinished) {
     panelFill(PANEL_TEXT);
     textSize(12);
-    text("YOU CRASHED", GAME_WIDTH / 2, 52);
-    textSize(9);
-    text("SCORE " + padScore(mpSelfScore), GAME_WIDTH / 2, 78);
+    text("YOU CRASHED", GAME_WIDTH / 2, 48);
+    // Both scores, theirs still climbing in the ghost's blue, so watching them
+    // run on is a race you can still follow rather than a wait.
+    textSize(10);
+    text("YOU  " + padScore(mpSelfScore), GAME_WIDTH / 2, 74);
+    fill(GHOST_TINT[0], GHOST_TINT[1], GHOST_TINT[2]);
+    text("THEM " + padScore(mpOpponentLiveScore === null ? 0 : mpOpponentLiveScore), GAME_WIDTH / 2, 94);
     panelFill(PANEL_TEXT_DIM);
     textSize(8);
-    text("WAITING FOR OPPONENT" + waitingDots(), GAME_WIDTH / 2, 104);
+    text("WAITING FOR OPPONENT" + waitingDots(), GAME_WIDTH / 2, 118);
   } else if (mpOpponentLeft) {
     panelHeadline("YOU WIN", 55, PANEL_GOOD, 16);
     panelFill(PANEL_TEXT_DIM);
@@ -4045,9 +4061,12 @@ function draw() {
   // width kept changing and the whole line visibly shifted left and right
   // every time a digit changed. Every character in a monospace font has the
   // same advance width, so that can't happen here.
-  if (inRaceView()) {
+  //
+  // Neither is drawn on the race's own panel screens - see
+  // raceScoreboardIsShown().
+  if (raceScoreboardIsShown()) {
     drawRaceScoreboard();
-  } else {
+  } else if (!inRaceView()) {
     drawScoreHud();
   }
 

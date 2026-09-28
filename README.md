@@ -1,5 +1,7 @@
 # Project-TREX-
 
+![Two pixel-art dinosaurs jumping a cactus side by side, one a translucent blue ghost, under a race scoreboard](docs/preview.png)
+
 A T-Rex runner in the spirit of Chrome's offline dino, built with p5.js and
 p5.play — with a two-player head-to-head race mode over the network.
 
@@ -46,6 +48,10 @@ a **COPY LINK** button. The other player either types the code under **JOIN
 ROOM**, or just opens the link — which drops them straight into the room. Both
 players then count down together and start at the same moment.
 
+| The lobby | The result |
+| --- | --- |
+| ![The room code shown as four split-flap tiles, with COPY LINK and LEAVE buttons](docs/lobby.png) | ![A YOU WIN panel with both final scores, the winning margin as a bar, and a rematch offer](docs/result.png) |
+
 If your opponent crashes first you're told their final score, so you know
 exactly what to beat. If they quit mid-run they leave the track and it's a
 forfeit. If the connection dies mid-race it's declared unscored, rather than
@@ -77,6 +83,8 @@ multiplayer needs the server, since that is what hands out rooms.
 
 ## Deploying
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/SAMEER-KHAN-1/Project-TREX-)
+
 `render.yaml` configures a single free Render web service. Point Render at the
 repo as a Blueprint and it will serve the game and run the relay together, so
 there is nothing to configure afterwards — the client works out its own
@@ -90,6 +98,11 @@ instead.
 
 Free instances sleep when idle, so the first load after a quiet spell takes
 30–60 seconds, and an idle socket may be dropped mid-race.
+
+A link to the game unfurls into a preview card on LinkedIn, Slack or WhatsApp.
+Those cards need an absolute image URL, which the page cannot know in advance,
+so `index.html` says `%ORIGIN%` and the server writes in the address it was
+actually asked for — `https://` behind Render's proxy, the LAN IP on a phone.
 
 ## Tests
 
@@ -130,7 +143,7 @@ they cover, and why each exists:
 | `monkey-test` | 100,000 frames of random input — no crash, wedge, NaN or leak |
 | `relay/race/rematch-test` | The wire protocol, against a real server |
 | `server-hardening-test` | Junk frames, oversized frames and room hoarding |
-| `static-test` | Game files go out compressed and revalidate as 304; `.git` and other hidden files are never served |
+| `static-test` | Game files go out compressed and revalidate as 304; link previews carry the right address; `.git` and other hidden files are never served |
 
 `test/tools/measure-art.js` prints the luminance of every sprite against the
 night palette. It is not a test — it is where the outline threshold's value
@@ -192,4 +205,5 @@ p5.js p5.play.js  vendored libraries
 *.png             sprites (crows and boulders are drawn in code)
 server/server.js  static file hosting + the WebSocket room relay
 render.yaml       Render deployment config
+docs/             link preview card, favicon, README screenshots
 ```
