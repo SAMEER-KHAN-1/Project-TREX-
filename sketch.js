@@ -2686,9 +2686,12 @@ function drawPausedOverlay() {
   push();
   rectMode(CENTER);
   noStroke();
-  //dims the frozen world so the overlay is clearly a state, not a glitch
+  // Dims the frozen world so the overlay is clearly a state, not a glitch.
+  // The whole canvas, not just the 600x200 strip: this is drawn in strip
+  // coordinates, and dimming only the strip left the extra sky above it and
+  // the sand below it lit, framing the paused game in a dark band.
   fill(0, 0, 0, 120);
-  rect(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT);
+  rect(width / 2, height / 2 - viewOffsetY, width, height);
   pop();
 
   drawInkCard(GAME_WIDTH / 2, 100, 260, 74);
@@ -3620,25 +3623,7 @@ function draw() {
   // score over the mid-fade sky would be close to unreadable for a second.
   var textShade = nightAmount > 0.5 ? 255 : 0;
 
-  // Pinned to the real screen corner (not the 600x200 strip) so it stays in
-  // the top-right border regardless of how much extra sky fullscreen adds
-  // above the strip. Isolated in its own push/pop so the font and
-  // right-alignment don't leak into the MUTED/PAUSED text drawn below.
-  //
-  // "Press Start 2P" - a true monospace pixel font, matching the retro
-  // arcade digit display the real Chrome dino uses. Monospace matters here
-  // beyond just looking right: Bangers (tried first) has different widths
-  // per digit, so as the score changed, the right-aligned text's rendered
-  // width kept changing and the whole line visibly shifted left and right
-  // every time a digit changed. Every character in a monospace font has the
-  // same advance width, so that can't happen here.
-  if (inRaceView()) {
-    drawRaceScoreboard();
-  } else {
-    drawScoreHud();
-  }
-
-  // Everything from here down to drawSprites() is drawn in gameplay-strip
+  // Everything from here down to pop() is drawn in gameplay-strip
   // coordinates (0-600 x 0-200), shifted to wherever the strip sits on screen.
   push();
   var shake = currentShakeOffset();
@@ -3648,8 +3633,10 @@ function draw() {
 
   handleMuteToggle();
   handlePauseToggle();
-  drawHudControls();
 
+  // The branches below only move the game on. Nothing in them draws: each
+  // screen's UI is painted by drawScreenOverlay() once the world is down - see
+  // the comment there for why the order matters.
   if (gameState===PLAY){
     score = score + dtFactor;
     if (Math.floor(score) > highScore) {
@@ -3757,10 +3744,7 @@ function draw() {
 
     if (mpIsRacing) {
       mpSendState();
-      drawRaceGoFlash();
-      drawOpponentGoneBanner();
     }
-    drawControlsHint();
 
     if(trexHitsAnyObstacle()){
         setCrouching(false);
@@ -3775,6 +3759,7 @@ function draw() {
           mpFinish(Math.floor(score));
         } else {
           gameState = END;
+          raiseEndScreenSprites();
         }
         // Seed the "was this key already down" baseline with whatever the
         // player happens to be holding at the moment of death (very often
@@ -3809,23 +3794,16 @@ function draw() {
     }
     restartKeyWasDown = restartKeyIsDown;
 
-    drawGameOverStats();
-
     //otherwise picking Single Player was a one-way trip - there was no way
     //back to the mode-select menu (to reach Multiplayer, say) once a run
     //had ended, short of reloading the page
-    drawButton(END_MENU_BUTTON, "MENU", BUTTON_SUBTLE);
     if (endMenuRequested || keyWentDown("esc")) {
       endMenuRequested = false;
       returnToMenu();
     }
   }
-  else if (gameState === PAUSED) {
-    drawPausedOverlay();
-  }
   else if (gameState === MENU) {
     updateMenuScenery(dtFactor);
-    drawMenuScreen();
     if (menuSinglePlayerRequested || keyWentDown("1")) {
       menuSinglePlayerRequested = false;
       //PLAY drives the ground from currentSpeed() every frame, so it only
@@ -3838,7 +3816,6 @@ function draw() {
     }
   }
   else if (gameState === MULTIPLAYER_MENU) {
-    drawMultiplayerMenuScreen();
     if (multiplayerCreateRequested) {
       multiplayerCreateRequested = false;
       mpCreateRoom();
@@ -3854,7 +3831,6 @@ function draw() {
     }
   }
   else if (gameState === MULTIPLAYER_WAITING) {
-    drawMultiplayerWaitingScreen();
     mpCheckConnectTimeout();
     if (multiplayerLeaveRequested || keyWentDown("esc")) {
       multiplayerLeaveRequested = false;
@@ -3863,21 +3839,18 @@ function draw() {
     }
   }
   else if (gameState === MULTIPLAYER_COUNTDOWN) {
-    // Leave is checked BEFORE the start time, and the countdown only draws
-    // when neither fired. Ordered the other way, a tap landing on the final
-    // countdown frame lost to the time check - the race began and left
-    // multiplayerLeaveRequested set, with nothing in PLAY to consume it. It
-    // then sat there until the player crashed, at which point the result
-    // screen read the stale flag on its very first frame and bounced straight
-    // to the menu, skipping the result entirely.
+    // Leave is checked BEFORE the start time. Ordered the other way, a tap
+    // landing on the final countdown frame lost to the time check - the race
+    // began and left multiplayerLeaveRequested set, with nothing in PLAY to
+    // consume it. It then sat there until the player crashed, at which point
+    // the result screen read the stale flag on its very first frame and
+    // bounced straight to the menu, skipping the result entirely.
     if (multiplayerLeaveRequested || keyWentDown("esc")) {
       multiplayerLeaveRequested = false;
       mpDisconnect();
       gameState = MULTIPLAYER_MENU;
     } else if (millis() >= mpRaceStartMillis) {
       startRace();
-    } else {
-      drawMultiplayerCountdownScreen();
     }
   }
   else if (gameState === MULTIPLAYER_RESULT) {
@@ -3890,7 +3863,6 @@ function draw() {
     cloudsGroup.setVelocityXEach(0);
     trex.changeAnimation("collided", trex_collided);
 
-    drawMultiplayerResultScreen();
     if (multiplayerRematchRequested || keyWentDown("r")) {
       multiplayerRematchRequested = false;
       mpRequestRematch();
@@ -3900,7 +3872,6 @@ function draw() {
     }
   }
   else if (gameState === MULTIPLAYER_JOIN_ENTRY) {
-    drawMultiplayerJoinEntryScreen();
     if (multiplayerJoinSubmitRequested) {
       multiplayerJoinSubmitRequested = false;
       var enteredCode = roomCodeInputElt ? roomCodeInputElt.value : "";
@@ -3916,7 +3887,6 @@ function draw() {
     }
   }
 
-
   //before drawSprites() so the player's own trex always draws on top of the
   //ghost, never the other way round
   drawOpponentGhost(dt);
@@ -3924,10 +3894,92 @@ function draw() {
   drawSpriteNightOutline(trex, nightAmount);
   drawEndScreenNightOutlines();
   drawSprites();
+
+  drawScreenOverlay();
+  //last of all, so they stay lit and pressable above the pause dim - the
+  //play button on that screen is the only way a phone player can resume
+  drawHudControls();
   pop();
+
+  // Pinned to the real screen corner (not the 600x200 strip) so it stays in
+  // the top-right border regardless of how much extra sky fullscreen adds
+  // above the strip. Drawn after the world for the same reason the overlays
+  // are: the clouds fly at the plate's height on a wide screen.
+  //
+  // "Press Start 2P" - a true monospace pixel font, matching the retro
+  // arcade digit display the real Chrome dino uses. Monospace matters here
+  // beyond just looking right: Bangers (tried first) has different widths
+  // per digit, so as the score changed, the right-aligned text's rendered
+  // width kept changing and the whole line visibly shifted left and right
+  // every time a digit changed. Every character in a monospace font has the
+  // same advance width, so that can't happen here.
+  if (inRaceView()) {
+    drawRaceScoreboard();
+  } else {
+    drawScoreHud();
+  }
 
   drawDeathFlash();
   applyPointerCursor();
+}
+
+// ---------------------------------------------------------------------------
+// Screen overlays
+//
+// Every screen's own UI - panels, buttons, banners, hints - painted on top of
+// a world that has already been drawn. It used to be drawn from inside each
+// gameState branch of draw(), which ran BEFORE drawSprites(), so the world
+// was painted over the interface: the ground line ran straight through every
+// button, and clouds drifted across the result panel and the game-over card,
+// covering the very scores they exist to show.
+//
+// Picked by the state draw() has just moved the game into, so a screen that
+// changed this frame is shown this frame rather than one frame late.
+// ---------------------------------------------------------------------------
+function drawScreenOverlay() {
+  if (gameState === PLAY) {
+    if (mpIsRacing) {
+      drawRaceGoFlash();
+      drawOpponentGoneBanner();
+    }
+    drawControlsHint();
+  } else if (gameState === END) {
+    drawGameOverStats();
+    drawButton(END_MENU_BUTTON, "MENU", BUTTON_SUBTLE);
+  } else if (gameState === PAUSED) {
+    drawPausedOverlay();
+  } else if (gameState === MENU) {
+    drawMenuScreen();
+  } else if (gameState === MULTIPLAYER_MENU) {
+    drawMultiplayerMenuScreen();
+  } else if (gameState === MULTIPLAYER_WAITING) {
+    drawMultiplayerWaitingScreen();
+  } else if (gameState === MULTIPLAYER_COUNTDOWN) {
+    drawMultiplayerCountdownScreen();
+  } else if (gameState === MULTIPLAYER_RESULT) {
+    drawMultiplayerResultScreen();
+  } else if (gameState === MULTIPLAYER_JOIN_ENTRY) {
+    drawMultiplayerJoinEntryScreen();
+  }
+}
+
+// The GAME OVER art and the restart icon are sprites, so they are drawn by
+// drawSprites() in depth order among everything else - and every cloud is
+// handed a depth above the last, while every obstacle is created on top of
+// all that exist. A few seconds into any run, clouds were already sorting in
+// front of the words, and a cactus that happened to be mid-screen at the
+// moment of the crash stood in front of the restart icon. Lifted above the
+// whole world, once, at the moment they appear.
+function raiseEndScreenSprites() {
+  var top = Math.max(trex.depth, ground.depth);
+  var groups = [obstaclesGroup, cloudsGroup];
+  for (var g = 0; g < groups.length; g++) {
+    for (var i = 0; i < groups[g].length; i++) {
+      top = Math.max(top, groups[g][i].depth);
+    }
+  }
+  gameOver.depth = top + 1;
+  restart.depth = top + 2;
 }
 
 // Sprites are removed once they leave the screen rather than after a fixed

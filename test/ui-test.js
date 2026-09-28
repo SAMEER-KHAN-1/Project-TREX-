@@ -377,6 +377,9 @@ sandbox.nightAmount = 0;
     sandbox.mpOpponentFinished = false;
     sandbox.mpOpponentLiveScore = theirScore;
     sandbox.score = selfScore;
+    //the scoreboard is drawn after the frame's own score tick, so no time may
+    //pass in it - the lead on screen is then exactly the one set up here
+    sandbox.lastFrameMillis = clock + 16;
     frame();
   }
 
@@ -440,6 +443,81 @@ sandbox.nightAmount = 0;
   frame();
   check("a record run says so instead of repeating the best", drewText("NEW RECORD"));
   check("the beaten best is not also shown", !drewText("BEST 01600"));
+}
+
+// Layering. The world - ground line, clouds, cacti - is painted first and
+// every screen's interface on top of it. It used to be the other way round:
+// the ground line ran through every button, and clouds drifted across the
+// result panel and the game-over card, over the very scores they show.
+{
+  const WORLD = { kind: "sprites" };
+  const realDrawSprites = sandbox.drawSprites;
+  sandbox.drawSprites = () => rects.push(WORLD);
+  const slabIndex = (button) => rects.findIndex((r) =>
+    r.kind === "rect" && r.w === button.w && r.h === button.h &&
+    Math.abs(r.x - button.x) < 0.01 && Math.abs(r.y - button.y) <= sandbox.BUTTON_LIFT + 0.01);
+
+  sandbox.mpIsRacing = false;
+  const screens = [
+    ["menu", sandbox.MENU, sandbox.MENU_SINGLE_PLAYER_BUTTON],
+    ["multiplayer menu", sandbox.MULTIPLAYER_MENU, sandbox.MULTIPLAYER_CREATE_BUTTON],
+    ["game over", sandbox.END, sandbox.END_MENU_BUTTON],
+  ];
+  for (const [name, state, button] of screens) {
+    sandbox.gameState = state;
+    sandbox.restartKeyWasDown = true;
+    frame();
+    const world = rects.indexOf(WORLD);
+    const slab = slabIndex(button);
+    check("the " + name + " buttons draw over the world", world !== -1 && slab > world,
+      "world " + world + ", button " + slab);
+  }
+  sandbox.gameState = sandbox.MENU;
+  frame();
+
+  // Paused on a screen taller than the strip, which is every phone and most
+  // monitors: the dim has to reach the extra sky and sand too, not stop at the
+  // strip's edges and leave the paused game framed in a dark band.
+  const savedHeight = sandbox.height;
+  const savedOffset = sandbox.viewOffsetY;
+  sandbox.height = 400;
+  sandbox.viewOffsetY = 120;
+  sandbox.gameState = sandbox.PAUSED;
+  frame();
+  const dimIndex = rects.findIndex((r) => r.kind === "rect" && r.fill &&
+    r.fill.length === 4 && r.fill[3] === 120 && r.fill[0] === 0);
+  const dim = rects[dimIndex];
+  check("pausing dims the whole screen", dim && dim.w === 600 && dim.h === 400,
+    dim && dim.w + "x" + dim.h);
+  check("the dim is centred on the canvas, not the strip",
+    dim && dim.y === 400 / 2 - 120, dim && String(dim.y));
+  // The play button is the only way a phone player can resume, so it must
+  // not be dimmed along with everything else.
+  check("the resume button draws above the dim", dimIndex !== -1 && slabIndex(sandbox.PAUSE_BUTTON) > dimIndex,
+    "dim " + dimIndex + ", button " + slabIndex(sandbox.PAUSE_BUTTON));
+  sandbox.height = savedHeight;
+  sandbox.viewOffsetY = savedOffset;
+
+  // GAME OVER and the restart icon are sprites, sorted by depth among
+  // everything else. Every cloud takes a depth above the last, so a run of a
+  // few seconds was enough to put clouds in front of the words.
+  sandbox.gameState = sandbox.PLAY;
+  sandbox.trex.depth = 40;
+  sandbox.cloudsGroup.add(Object.assign(sandbox.createSprite(300, 100, 40, 10), { depth: 39 }));
+  sandbox.obstaclesGroup.add(Object.assign(sandbox.createSprite(300, 160, 10, 40), { depth: 44 }));
+  const realHit = sandbox.trexHitsAnyObstacle;
+  sandbox.trexHitsAnyObstacle = () => true;
+  frame();
+  sandbox.trexHitsAnyObstacle = realHit;
+  check("a crash reaches game over", sandbox.gameState === sandbox.END, "state " + sandbox.gameState);
+  check("the game over art sorts above the world", sandbox.gameOver.depth > 44, String(sandbox.gameOver.depth));
+  check("the restart icon sorts above the world", sandbox.restart.depth > 44, String(sandbox.restart.depth));
+  sandbox.obstaclesGroup.removeSprites();
+  sandbox.cloudsGroup.removeSprites();
+
+  sandbox.drawSprites = realDrawSprites;
+  sandbox.gameState = sandbox.MENU;
+  frame();
 }
 
 // On the game over screen every tap counts as "restart" - that is what makes

@@ -131,6 +131,9 @@ const drewGhost = (drawn) => drawn.images.some((n) => n && n.indexOf("ghost") ==
 // -- While they are still there, the ghost and the gap are correct.
 {
   const s = startedRace(600);
+  //the scoreboard is drawn after the frame's own score tick, so no time may
+  //pass in it - the gap on screen is then exactly 600 against 472
+  s.lastFrameMillis = clock + 16;
   const f = frame(s);
   check("a live opponent is drawn", drewGhost(f), f.images.join(","));
   check("a live opponent has a score to chase", said(f, "THEM 00472"), f.text.join(" | "));
