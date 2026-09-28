@@ -12,6 +12,9 @@ function check(label, ok, extra) { if (!ok) failures++; console.log("  " + label
 let clock = 0;
 const listeners = {};
 let cssBox = { left: 0, top: 0, width: 600, height: 200 };
+//p5's drawing-buffer density, and how many times the game has changed it
+let density = 1;
+let densityChanges = 0;
 
 function fakeImage(name, w, h) {
   const width = w || 88, height = h || 94;
@@ -55,6 +58,12 @@ const sandbox = {
   // The real resizeCanvas updates width/height synchronously; without that the
   // test could not catch a mismatch between them and viewOffsetY.
   resizeCanvas: (w, h) => { sandbox.width = w; sandbox.height = h; },
+  //the same getter/setter shape as p5's own
+  pixelDensity: (d) => {
+    if (d === undefined) return density;
+    density = d;
+    densityChanges++;
+  },
   frameRate: noop, background: noop,
   push: noop, pop: noop, translate: noop, noStroke: noop, stroke: noop, strokeWeight: noop,
   fill: noop, rect: noop, ellipse: noop, text: noop, textFont: noop, textAlign: noop,
@@ -155,6 +164,48 @@ check("run keeps playing", sandbox.gameState === sandbox.PLAY);
 check("score keeps climbing", sandbox.score > scoreBefore);
 check("distance keeps advancing", sandbox.distanceTravelled > distBefore);
 check("trex position stays valid", isFinite(sandbox.trex.y) && sandbox.trex.y > 0);
+console.log("");
+
+// Drawing resolution. The canvas is stretched by CSS to fill the screen, so the
+// buffer behind it has to be sized to the pixels it really covers - p5 sizes
+// it from devicePixelRatio alone, which on a 1080p monitor drew the game at
+// 600 pixels wide and let the browser blow it up 3.2x into a blur.
+console.log("drawing resolution");
+function atRatio(ratio, screenW, screenH) {
+  sandbox.window.devicePixelRatio = ratio;
+  resizeTo(screenW, screenH);
+  return 600 * density;
+}
+const bufferWidth = (ratio, w, h) => Math.round(atRatio(ratio, w, h));
+
+check("a 1080p monitor draws every pixel", bufferWidth(1, 1920, 1080) === 1920,
+  String(bufferWidth(1, 1920, 1080)));
+check("a laptop draws every pixel", bufferWidth(1, 1366, 768) === 1366,
+  String(bufferWidth(1, 1366, 768)));
+check("a retina window draws at its own ratio", bufferWidth(2, 800, 600) === 1600,
+  String(bufferWidth(2, 800, 600)));
+check("a phone draws no more than it shows", bufferWidth(3, 390, 844) === 1170,
+  String(bufferWidth(3, 390, 844)));
+check("a 4K monitor is capped", bufferWidth(1, 3840, 2160) === sandbox.MAX_DRAWING_BUFFER_WIDTH,
+  String(bufferWidth(1, 3840, 2160)));
+check("a tiny window keeps one pixel per unit", bufferWidth(1, 320, 240) === 600,
+  String(bufferWidth(1, 320, 240)));
+
+// Dragging the window to a monitor with another pixel ratio changes nothing
+// about its size, so no resize event says so - the frame loop has to notice.
+atRatio(1, 1280, 720);
+sandbox.window.devicePixelRatio = 2;
+clock += 16; sandbox.draw();
+check("a ratio change is noticed without a resize", Math.round(600 * density) === 2560,
+  String(600 * density));
+
+// And a steady screen must not be re-laid-out: changing the density resizes
+// the canvas, which clears it and forces the browser to relayout.
+const changesBefore = densityChanges;
+for (let i = 0; i < 30; i++) { clock += 16; sandbox.draw(); }
+check("a steady screen never re-sets the density", densityChanges === changesBefore,
+  (densityChanges - changesBefore) + " changes");
+sandbox.window.devicePixelRatio = 1;
 
 console.log("");
 console.log(failures === 0 ? "ALL PASS" : failures + " FAILED");

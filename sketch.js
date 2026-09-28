@@ -2766,7 +2766,43 @@ function viewportHeight() {
 // What fillScreen() last laid the canvas out for, so an unchanged viewport can
 // skip both the style writes and the layout they would force - see
 // syncScreenLayout().
-var appliedLayout = { width: 0, height: 0 };
+var appliedLayout = { width: 0, height: 0, ratio: 0 };
+
+function deviceRatio() {
+  return window.devicePixelRatio || 1;
+}
+
+// ---------------------------------------------------------------------------
+// Drawing resolution
+//
+// The canvas is always 600 game units wide and is stretched by CSS to fill the
+// screen, but p5 sizes its drawing buffer from devicePixelRatio alone - which
+// knows nothing about that stretch. On an ordinary 1080p monitor the ratio is
+// 1, so the whole game was drawn into a 600x338 buffer and the browser blew it
+// up 3.2x: every letter, button edge and sprite came out as a soft blur, on
+// exactly the screen most people will first see it on. Phones had the reverse
+// problem: a ratio of 3 made a 1800-pixel-wide buffer that was then shrunk to
+// fit a screen 1170 pixels across, drawing half again as many pixels as the
+// screen could show, every frame.
+//
+// So the buffer is sized to the pixels the canvas really covers on screen:
+// its CSS width times devicePixelRatio. Nothing in the game's own coordinates
+// changes - p5 scales the drawing context by the density - so physics, hit
+// boxes and the course are untouched; there are simply as many pixels behind
+// each game unit as the screen can show.
+// ---------------------------------------------------------------------------
+//a buffer this wide is already sharp on any screen a browser window reaches,
+//and keeps a 4K display from quadrupling the fill work of every frame
+var MAX_DRAWING_BUFFER_WIDTH = 2560;
+
+function displayPixelDensity(cssWidth) {
+  var bufferWidth = Math.round(cssWidth * deviceRatio());
+  // Never below one buffer pixel per game unit: a window that small is shown
+  // shrunk anyway, and drawing fewer pixels than the game's own units would
+  // only make the sprites' edges worse on the way down.
+  bufferWidth = Math.max(GAME_WIDTH, Math.min(MAX_DRAWING_BUFFER_WIDTH, bufferWidth));
+  return bufferWidth / GAME_WIDTH;
+}
 
 function fillScreen() {
   var screenWidth = viewportWidth();
@@ -2790,6 +2826,14 @@ function fillScreen() {
   if (Math.abs(cssHeight - screenHeight) <= scaleFactor + 1) {
     cssHeight = screenHeight;
   }
+  // Before the style writes below, because p5 resizes the canvas to change its
+  // density and resets the element's CSS size to the game's own while doing it.
+  if (typeof pixelDensity === "function") {
+    var density = displayPixelDensity(cssWidth);
+    if (Math.abs(pixelDensity() - density) > 0.001) {
+      pixelDensity(density);
+    }
+  }
   var canvasElt = canvasElement();
   if (canvasElt) {
     canvasElt.style.width = cssWidth + "px";
@@ -2800,6 +2844,7 @@ function fillScreen() {
   unitsPerCssPixel = cssWidth > 0 ? width / cssWidth : 1;
   appliedLayout.width = screenWidth;
   appliedLayout.height = screenHeight;
+  appliedLayout.ratio = deviceRatio();
 }
 
 // Called at the top of every frame, so the canvas is always laid out for the
@@ -2808,11 +2853,15 @@ function fillScreen() {
 // the state where the strip the player is looking at and the strip the hit
 // tests are measured against stop being the same strip.
 //
-// Cheap in the normal case: it reads two numbers off window and returns, so
+// Cheap in the normal case: it reads three numbers off window and returns, so
 // nothing is written and no relayout happens unless the viewport really moved.
+// The pixel ratio is one of them because dragging the window onto a monitor
+// with a different one changes how many pixels the canvas covers without
+// changing its size at all.
 function syncScreenLayout() {
   if (viewportWidth() === appliedLayout.width &&
-      viewportHeight() === appliedLayout.height) {
+      viewportHeight() === appliedLayout.height &&
+      deviceRatio() === appliedLayout.ratio) {
     return;
   }
   fillScreen();
