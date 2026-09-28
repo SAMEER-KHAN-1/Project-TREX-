@@ -82,6 +82,12 @@ repo as a Blueprint and it will serve the game and run the relay together, so
 there is nothing to configure afterwards — the client works out its own
 WebSocket address from whatever URL the page was loaded from.
 
+The service deliberately has no `rootDir`. Render leaves everything outside a
+service's root directory out of the deploy, and the server hosts the game's
+files from the repo root, so pointing it at `server/` would ship a relay with no
+game to serve. The build installs the relay's one dependency into `server/`
+instead.
+
 Free instances sleep when idle, so the first load after a quiet spell takes
 30–60 seconds, and an idle socket may be dropped mid-race.
 
@@ -120,6 +126,7 @@ they cover, and why each exists:
 | `statemachine-test` | Every screen transition, plus forfeits and dropped sockets |
 | `highscore-test` | A new best survives closing the tab, without writing every frame |
 | `connect-test` | A sleeping server explains itself, then gives up rather than hanging |
+| `deploy-test` | `render.yaml` ships every file the page loads, and the start command serves them |
 | `monkey-test` | 100,000 frames of random input — no crash, wedge, NaN or leak |
 | `relay/race/rematch-test` | The wire protocol, against a real server |
 | `server-hardening-test` | Junk frames, oversized frames and room hoarding |

@@ -50,6 +50,7 @@ const UNIT = [
   "statemachine-test.js",
   "highscore-test.js",
   "connect-test.js",
+  "deploy-test.js",
   "monkey-test.js",
 ];
 

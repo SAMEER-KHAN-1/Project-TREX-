@@ -2,10 +2,17 @@ services:
   - type: web
     name: trex-multiplayer-server
     runtime: node
-    rootDir: server
-    buildCommand: npm install
+    # Deliberately no rootDir. The server hosts the game's own files from the
+    # repo root (see the static-hosting block in server/server.js), and Render
+    # leaves everything outside a service's rootDir out of both the build and
+    # the running instance - so `rootDir: server` served a 404 for the page,
+    # the scripts and every sprite. The relay's own dependencies are installed
+    # into server/ instead, where server.js looks for them.
+    buildCommand: npm ci --prefix server
     startCommand: npm start
     plan: free
     envVars:
+      # Node 18 is past end of life; pinned to a major so a new release
+      # cannot change the runtime under a deploy that nobody touched
       - key: NODE_VERSION
-        value: 18.20.4
+        value: "24"
