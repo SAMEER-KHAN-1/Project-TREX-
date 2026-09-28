@@ -631,6 +631,39 @@ document.addEventListener("touchcancel", touchEnded);
   };
 })();
 
+// ---------------------------------------------------------------------------
+// Naming the right controls
+//
+// Several screens tell the player what to press - P to resume, R for a
+// rematch, 1 or 2 on the menu. On a phone there is nothing to press, so those
+// prompts named keys the player did not have, and on the pause screen the only
+// instruction given was one a phone player could not follow.
+//
+// The wording follows the input the player last actually used rather than a
+// guess about the device. A touchscreen laptop is both, and a phone with a
+// Bluetooth keyboard is a keyboard player - what they last touched is the one
+// thing that is never wrong about what they have in hand. Before any input at
+// all, a coarse pointer is the best available guess.
+// ---------------------------------------------------------------------------
+var playerIsOnTouch = typeof window.matchMedia === "function" &&
+                      window.matchMedia("(pointer: coarse)").matches;
+
+document.addEventListener("pointerdown", function (e) {
+  if (e.pointerType === "touch") {
+    playerIsOnTouch = true;
+  } else if (e.pointerType === "mouse") {
+    playerIsOnTouch = false;
+  }
+});
+document.addEventListener("keydown", function (e) {
+  // A phone's on-screen keyboard fires keydown into the room code field, and
+  // typing a code there does not make anyone a keyboard player.
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) {
+    return;
+  }
+  playerIsOnTouch = false;
+});
+
 // Set by the canvas pointer handler below and consumed in draw().
 var restartRequested = false;
 
@@ -724,6 +757,11 @@ function resolveServerUrl() {
 
 var mpSocket = null;
 var mpRoomCode = null;
+// Joining someone else's room rather than hosting one. Both players sit on the
+// same waiting screen while their socket connects, but only the host is
+// waiting for an opponent or has a room worth sharing - see
+// drawMultiplayerWaitingScreen().
+var mpJoining = false;
 var mpSeed = null;
 var mpConnectionMessage = null;
 
@@ -811,6 +849,7 @@ function mpDisconnect() {
   }
   mpSocket = null;
   mpRoomCode = null;
+  mpJoining = false;
   //must be cleared, or the next single-player run would keep replaying the
   //race's course - nextRunSeed() prefers mpSeed whenever it is set
   mpSeed = null;
@@ -1590,6 +1629,16 @@ function roomShareUrl(code) {
   return loc.origin + loc.pathname + "?room=" + code;
 }
 
+// The invite link, for the host only. A joiner has nothing to share: the room
+// they are connecting to is about to be full, so passing its link on could
+// only send a third person to "That room is already full."
+function hostShareUrl() {
+  if (!mpRoomCode || mpJoining) {
+    return null;
+  }
+  return roomShareUrl(mpRoomCode);
+}
+
 function readRoomFromUrl() {
   var match = /[?&]room=([A-Za-z0-9]{4})(?:&|$)/.exec(window.location.search);
   return match ? match[1].toUpperCase() : null;
@@ -1653,6 +1702,7 @@ function copyRoomLink(text) {
 }
 
 function mpCreateRoom() {
+  mpJoining = false;
   mpConnect(function () {
     mpSocket.send(JSON.stringify({ type: "create" }));
   });
@@ -1662,6 +1712,7 @@ function mpJoinRoom(code) {
   //shown immediately so the waiting screen has a room code to display for
   //the joiner too, same as the creator gets back from the "created" message
   mpRoomCode = code;
+  mpJoining = true;
   mpConnect(function () {
     mpSocket.send(JSON.stringify({ type: "join", room: code }));
   });
@@ -1837,7 +1888,7 @@ function screenButtons() {
     return [MULTIPLAYER_JOIN_SUBMIT_BUTTON, MENU_BACK_BUTTON];
   }
   if (gameState === MULTIPLAYER_WAITING) {
-    return mpRoomCode && roomShareUrl(mpRoomCode)
+    return hostShareUrl()
       ? [WAITING_COPY_BUTTON, WAITING_LEAVE_BUTTON]
       : [MULTIPLAYER_LEAVE_BUTTON];
   }
@@ -1910,7 +1961,7 @@ function onCanvasPointerDown(evt) {
       menuBackRequested = true;
     }
   } else if (gameState === MULTIPLAYER_WAITING) {
-    var shareUrl = mpRoomCode ? roomShareUrl(mpRoomCode) : null;
+    var shareUrl = hostShareUrl();
     if (shareUrl) {
       if (isOverButton(WAITING_COPY_BUTTON, point.x, point.y)) {
         // Copied right here rather than via a flag consumed in draw(), the way
@@ -2285,14 +2336,20 @@ function drawMenuScreen() {
   drawButton(MENU_SINGLE_PLAYER_BUTTON, "SINGLE PLAYER");
   drawButton(MENU_MULTIPLAYER_BUTTON, "MULTIPLAYER");
 
-  //the number keys already work as shortcuts; nothing said so until now
-  push();
-  textFont('"Press Start 2P", monospace');
-  textAlign(CENTER, CENTER);
-  textSize(7);
-  fill(INK[0], INK[1], INK[2], menuBlinkAlpha());
-  text("PRESS 1 OR 2   -   F FOR FULLSCREEN", GAME_WIDTH / 2, 183);
-  pop();
+  // The number keys already work as shortcuts; nothing said so until now.
+  // Only a keyboard player is told: a phone has no 1, 2 or F to press, and the
+  // buttons above are already the whole instruction there - see
+  // playerIsOnTouch. Set on the plain sand below the ground line rather than
+  // on it, where the pebbles in the ground art broke up the letters.
+  if (!playerIsOnTouch) {
+    push();
+    textFont('"Press Start 2P", monospace');
+    textAlign(CENTER, CENTER);
+    textSize(7);
+    fill(INK[0], INK[1], INK[2], menuBlinkAlpha());
+    text("PRESS 1 OR 2   -   F FOR FULLSCREEN", GAME_WIDTH / 2, 193);
+    pop();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2415,6 +2472,28 @@ function drawMultiplayerWaitingScreen() {
       text(note, GAME_WIDTH / 2, 120);
       text("THIS CAN TAKE UP TO A MINUTE", GAME_WIDTH / 2, 134);
     }
+  } else if (mpJoining) {
+    // The joiner shares this screen with the host while their socket
+    // connects, but they are the one being waited FOR - the host is already
+    // sitting in the room. Telling them they were waiting for an opponent,
+    // with a COPY LINK button for someone else's room, was wrong on both
+    // counts, and it hid the waking-server note a host would have been shown.
+    panelFill(PANEL_TEXT_DIM);
+    textSize(8);
+    text("JOINING ROOM", GAME_WIDTH / 2, 46);
+    pop();
+    drawRoomCodeTiles(mpRoomCode, GAME_WIDTH / 2, 82);
+    beginPanelText();
+    panelFill(PANEL_TEXT_DIM);
+    var joinNote = mpConnectingNote();
+    if (joinNote) {
+      textSize(7);
+      text(joinNote, GAME_WIDTH / 2, 120);
+      text("THIS CAN TAKE UP TO A MINUTE", GAME_WIDTH / 2, 134);
+    } else {
+      textSize(8);
+      text("CONNECTING" + waitingDots(), GAME_WIDTH / 2, 120);
+    }
   } else {
     panelFill(PANEL_TEXT_DIM);
     textSize(8);
@@ -2427,7 +2506,7 @@ function drawMultiplayerWaitingScreen() {
     textSize(8);
     text("WAITING FOR OPPONENT" + waitingDots(), GAME_WIDTH / 2, 120);
 
-    var shareUrl = roomShareUrl(mpRoomCode);
+    var shareUrl = hostShareUrl();
     if (shareUrl) {
       if (millis() < shareCopiedUntilMillis) {
         panelFill(PANEL_GOOD);
@@ -2442,7 +2521,7 @@ function drawMultiplayerWaitingScreen() {
   }
   pop();
 
-  if (mpRoomCode && roomShareUrl(mpRoomCode)) {
+  if (hostShareUrl()) {
     drawButton(WAITING_COPY_BUTTON, "COPY LINK", BUTTON_POSITIVE);
     drawButton(WAITING_LEAVE_BUTTON, "LEAVE", BUTTON_SUBTLE);
   } else {
@@ -2617,7 +2696,7 @@ function drawMultiplayerResultScreen() {
   pop();
 
   if (canRematch() && !mpRematchRequested) {
-    drawButton(RESULT_REMATCH_BUTTON, "REMATCH (R)", BUTTON_POSITIVE);
+    drawButton(RESULT_REMATCH_BUTTON, playerIsOnTouch ? "REMATCH" : "REMATCH (R)", BUTTON_POSITIVE);
     drawButton(RESULT_MENU_BUTTON, "MENU", BUTTON_SUBTLE);
   } else {
     //nobody to rematch, or already asked - one centered button reads better
@@ -2705,7 +2784,8 @@ function drawPausedOverlay() {
   text("PAUSED", GAME_WIDTH / 2, 86);
   panelFill(PANEL_TEXT_DIM);
   textSize(7);
-  text("PRESS P TO RESUME", GAME_WIDTH / 2, 114);
+  //the play button in the corner is the only way back for a phone player
+  text(playerIsOnTouch ? "TAP THE PLAY BUTTON TO RESUME" : "PRESS P TO RESUME", GAME_WIDTH / 2, 114);
   pop();
 }
 
@@ -3950,6 +4030,9 @@ function draw() {
   drawHudControls();
   pop();
 
+  //in the spare sky above the strip, so in screen space rather than strip space
+  drawRotateHint();
+
   // Pinned to the real screen corner (not the 600x200 strip) so it stays in
   // the top-right border regardless of how much extra sky fullscreen adds
   // above the strip. Drawn after the world for the same reason the overlays
@@ -3970,6 +4053,78 @@ function draw() {
 
   drawDeathFlash();
   applyPointerCursor();
+}
+
+// ---------------------------------------------------------------------------
+// Rotate hint
+//
+// Held upright, a phone gives this game a strip about 390 pixels wide. The
+// whole playfield shrinks to fit it - the smallest labels come out under five
+// pixels tall - while two thirds of the screen above and below is empty sky
+// and sand. Turning the phone sideways makes everything more than twice the
+// size, and nothing said so.
+//
+// So a portrait touchscreen is told, in that empty sky, at a size it can
+// actually read. Never during a run, where it would be something moving in
+// the corner of the player's eye, and never on a screen without the room.
+// ---------------------------------------------------------------------------
+//enough sky above the strip for the card to sit clear of the score plate
+var ROTATE_HINT_MIN_SKY = 300;
+//how long the phone icon holds each pose before flipping to the other
+var ROTATE_HINT_FLIP_MS = 900;
+//the lowest the corner HUD reaches - the race scoreboard is the taller one
+var ROTATE_HINT_HUD_BOTTOM = 110;
+
+function rotateHintIsShown() {
+  return playerIsOnTouch &&
+         gameState !== PLAY &&
+         viewportHeight() > viewportWidth() &&
+         viewOffsetY >= ROTATE_HINT_MIN_SKY;
+}
+
+// Rectangles only, like the HUD icons: a phone body with its screen, drawn
+// upright or on its side. Flipping between the two IS the instruction, so it
+// reads without the words.
+function drawPhoneIcon(x, y, sideways) {
+  var w = sideways ? 56 : 32;
+  var h = sideways ? 32 : 56;
+  push();
+  rectMode(CENTER);
+  noStroke();
+  fill(0, 0, 0, 70);
+  rect(x + 3, y + 4, w, h);
+  fill(PANEL_TEXT[0], PANEL_TEXT[1], PANEL_TEXT[2]);
+  rect(x, y, w, h);
+  //the screen, lit in the marquee amber once the phone is the right way round
+  var lit = sideways ? BUTTON_PRIMARY.idle : PANEL_TEXT_DIM;
+  fill(lit[0], lit[1], lit[2]);
+  rect(x, y, w - (sideways ? 16 : 8), h - (sideways ? 8 : 16));
+  pop();
+}
+
+function drawRotateHint() {
+  if (!rotateHintIsShown()) {
+    return;
+  }
+  //centred in the sky between the corner HUD and the top of the strip
+  var cy = (ROTATE_HINT_HUD_BOTTOM + viewOffsetY) / 2;
+  drawInkCard(GAME_WIDTH / 2, cy, 380, 160);
+  drawPhoneIcon(GAME_WIDTH / 2, cy - 38,
+                Math.floor(millis() / ROTATE_HINT_FLIP_MS) % 2 === 1);
+
+  push();
+  noStroke();
+  textFont('"Press Start 2P", monospace');
+  textAlign(CENTER, CENTER);
+  //sized for a canvas shown at about two thirds scale, which is what a
+  //portrait phone does to it - these come out around 14 and 9 CSS pixels
+  textSize(22);
+  panelFill(PANEL_TEXT);
+  text("TURN SIDEWAYS", GAME_WIDTH / 2, cy + 26);
+  textSize(14);
+  panelFill(PANEL_TEXT_DIM);
+  text("FOR A BIGGER VIEW", GAME_WIDTH / 2, cy + 56);
+  pop();
 }
 
 // ---------------------------------------------------------------------------

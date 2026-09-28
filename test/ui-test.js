@@ -741,6 +741,147 @@ for (const [label, setUp] of variants) drawsWithoutThrowing(label, setUp);
   sandbox.playerHasJumped = true;
 })();
 
+// --- The joiner's lobby. Host and joiner share the waiting screen while the
+// socket connects, but only the host is waiting for anyone, and only the host
+// has a room worth sharing: a joiner's link could only send a third person to
+// a room that is about to be full.
+(function () {
+  const labels = () => sandbox.buttonsOnScreen();
+  sandbox.gameState = sandbox.MULTIPLAYER_WAITING;
+  sandbox.mpRoomCode = "AB12";
+  sandbox.mpJoining = false;
+  frame();
+  check("the host is waiting for an opponent", drewText("WAITING FOR OPPONENT"));
+  check("the host can copy the invite link", labels().indexOf(sandbox.WAITING_COPY_BUTTON) !== -1);
+
+  sandbox.mpJoining = true;
+  frame();
+  check("a joiner is told they are joining", drewText("JOINING ROOM"));
+  check("a joiner is not told to wait for an opponent", !drewText("WAITING FOR OPPONENT"));
+  check("a joiner has no link to copy", labels().indexOf(sandbox.WAITING_COPY_BUTTON) === -1 &&
+    labels().indexOf(sandbox.MULTIPLAYER_LEAVE_BUTTON) !== -1);
+  check("a joiner is not shown the invite link", !texts.some((t) => t.str.indexOf("?room=") !== -1));
+  check("a joiner still sees the code they are joining", ["A", "B", "1", "2"].every((c) => drewText(c)));
+
+  // A slow server is as likely to keep a joiner waiting as a host, and the
+  // explanation used to be shown only to the host.
+  sandbox.mpSocket = { readyState: 0 };
+  sandbox.mpSocketOpen = false;
+  sandbox.mpConnectStartedMillis = clock - sandbox.MP_CONNECT_SLOW_MS - 100;
+  frame();
+  check("a joiner is told the server may be waking", drewText("WAKING UP"));
+
+  // And the flag must not outlive the attempt, or the next room this player
+  // hosts would hide its own invite link.
+  sandbox.mpSocket = null;
+  sandbox.mpDisconnect();
+  check("leaving clears the joining flag", sandbox.mpJoining === false);
+  sandbox.mpJoinRoom("CD34");
+  check("joining by code sets it", sandbox.mpJoining === true);
+  sandbox.mpDisconnect();
+  sandbox.mpConnectionMessage = null;
+  sandbox.gameState = sandbox.MENU;
+})();
+
+// --- Prompts name the controls the player actually has. A phone has no P,
+// R, 1, 2 or F, and on the pause screen the old wording was the only
+// instruction given - one a phone player could not follow.
+(function () {
+  const prompt = () => texts.find((t) => t.str.indexOf("PRESS 1 OR 2") !== -1);
+
+  sandbox.playerIsOnTouch = false;
+  sandbox.gameState = sandbox.MENU;
+  frame();
+  check("a keyboard player is told the shortcuts", !!prompt());
+  // The ground art spans y 174-186 with pebbles in it, which broke the
+  // letters up when the prompt sat on it.
+  check("the shortcut prompt sits below the ground art", prompt() && prompt().y - prompt().size / 2 > 186,
+    prompt() && String(prompt().y));
+  sandbox.playerIsOnTouch = true;
+  frame();
+  check("a touch player is not told about keys", !prompt());
+
+  sandbox.gameState = sandbox.PAUSED;
+  sandbox.playerIsOnTouch = false;
+  frame();
+  check("keyboard pause says press P", drewText("PRESS P TO RESUME"));
+  sandbox.playerIsOnTouch = true;
+  frame();
+  check("touch pause points at the play button", drewText("TAP THE PLAY BUTTON") && !drewText("PRESS P"));
+
+  sandbox.gameState = sandbox.MULTIPLAYER_RESULT;
+  sandbox.mpSocket = { readyState: 1, send: noop, close: noop };
+  sandbox.WebSocket = { OPEN: 1 };
+  sandbox.mpConnectionLost = false;
+  sandbox.mpOpponentLeft = false;
+  sandbox.mpOpponentPresent = true;
+  sandbox.mpOpponentFinished = true;
+  sandbox.mpRematchRequested = false;
+  sandbox.mpSelfScore = 500;
+  sandbox.mpOpponentScore = 400;
+  sandbox.playerIsOnTouch = false;
+  frame();
+  check("keyboard rematch names its key", drewText("REMATCH (R)"));
+  sandbox.playerIsOnTouch = true;
+  frame();
+  check("touch rematch does not", drewText("REMATCH") && !drewText("(R)"));
+
+  sandbox.mpSocket = null;
+  sandbox.playerIsOnTouch = false;
+  sandbox.gameState = sandbox.MENU;
+})();
+
+// --- Rotate hint. Upright, a phone shows the game as a strip about 390px
+// wide with most of the screen empty; the hint says so in that empty sky.
+(function () {
+  const hinted = () => drewText("TURN SIDEWAYS");
+  function portraitPhone() {
+    sandbox.window.innerWidth = 390;
+    sandbox.window.innerHeight = 844;
+    //the canvas height fillScreen() asks for at that shape - the stubbed
+    //resizeCanvas cannot apply it, so it is set up front
+    sandbox.height = Math.round(600 * 844 / 390);
+  }
+  function landscape() {
+    sandbox.window.innerWidth = 844;
+    sandbox.window.innerHeight = 390;
+    sandbox.height = Math.round(600 * 390 / 844);
+  }
+
+  portraitPhone();
+  sandbox.playerIsOnTouch = true;
+  sandbox.gameState = sandbox.MENU;
+  frame();
+  check("an upright phone is told to turn sideways", hinted());
+  const heading = texts.find((t) => t.str === "TURN SIDEWAYS");
+  // At a portrait phone's scale of about 0.65, anything much under 16 game
+  // units is too small to read comfortably - which is the whole problem.
+  check("the hint is set large enough to read", heading && heading.size >= 18, heading && String(heading.size));
+  check("the hint sits in the sky above the strip", heading && heading.y < sandbox.viewOffsetY,
+    heading && heading.y + " vs " + sandbox.viewOffsetY);
+
+  sandbox.gameState = sandbox.PLAY;
+  sandbox.trexHitsAnyObstacle = () => false;
+  frame();
+  check("the hint never shows during a run", !hinted());
+  sandbox.gameState = sandbox.MENU;
+
+  sandbox.playerIsOnTouch = false;
+  frame();
+  check("a narrow desktop window gets no hint", !hinted());
+  sandbox.playerIsOnTouch = true;
+
+  landscape();
+  frame();
+  check("a sideways phone gets no hint", !hinted());
+
+  delete sandbox.window.innerWidth;
+  delete sandbox.window.innerHeight;
+  sandbox.height = 200;
+  sandbox.playerIsOnTouch = false;
+  frame();
+})();
+
 console.log("");
 console.log(failures === 0 ? "ALL PASS" : failures + " FAILED");
 process.exit(failures === 0 ? 0 : 1);
