@@ -16,6 +16,7 @@ const http = require("http");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const zlib = require("zlib");
 const { WebSocketServer } = require("ws");
 
 const PORT = process.env.PORT || 8080;
@@ -129,6 +130,93 @@ function sendPlain(res, status, body) {
   res.end(body);
 }
 
+// ---------------------------------------------------------------------------
+// Compression and caching
+//
+// The page weighs about 3.5MB, almost all of it p5.js - and it was sent raw,
+// every visit, to what is most often a phone on mobile data following a link.
+// Text compresses enormously: p5.js goes from 3.1MB to about 400KB. Images are
+// already compressed, so they are sent as they are.
+//
+// Brotli where the browser offers it, which browsers only do over https - so
+// that is the deployed game. gzip otherwise, which covers a phone on the LAN.
+// Quality 9 rather than brotli's maximum of 11: it costs ~200ms once per file
+// instead of ~7 seconds, for a result only about 10% larger.
+//
+// Each file is compressed once and kept, keyed by its size and modified time,
+// so editing a file during development is picked up on the next request.
+//
+// Every response also carries an ETag, so a returning player - someone who
+// opens a second invite link, or reloads - revalidates in one round trip and
+// a 304 instead of downloading the game again. no-cache means "check first",
+// not "don't cache", so a deploy is still picked up immediately.
+// ---------------------------------------------------------------------------
+const COMPRESSIBLE_TYPES = { ".html": true, ".js": true, ".css": true, ".json": true, ".svg": true };
+const BROTLI_OPTIONS = {
+  params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9 }
+};
+const GZIP_OPTIONS = { level: 9 };
+
+// filePath -> { key, raw, br, gzip } where br/gzip are promises of a Buffer,
+// created the first time each encoding is asked for
+const fileCache = new Map();
+
+// The encodings a request accepts, honouring an explicit q=0 refusal.
+function acceptedEncodings(req) {
+  var accepted = {};
+  String(req.headers["accept-encoding"] || "").split(",").forEach(function (part) {
+    var pieces = part.trim().split(";");
+    var name = pieces[0].trim().toLowerCase();
+    var q = 1;
+    pieces.slice(1).forEach(function (param) {
+      var match = /^\s*q\s*=\s*([\d.]+)\s*$/.exec(param);
+      if (match) {
+        q = parseFloat(match[1]);
+      }
+    });
+    if (name && q > 0) {
+      accepted[name] = true;
+    }
+  });
+  return accepted;
+}
+
+function readCached(filePath, stat, callback) {
+  var key = stat.size + ":" + stat.mtimeMs;
+  var entry = fileCache.get(filePath);
+  if (entry && entry.key === key) {
+    callback(null, entry);
+    return;
+  }
+  fs.readFile(filePath, function (err, raw) {
+    if (err) {
+      callback(err);
+      return;
+    }
+    entry = { key: key, raw: raw, br: null, gzip: null };
+    fileCache.set(filePath, entry);
+    callback(null, entry);
+  });
+}
+
+// Asynchronous, so compressing p5.js the first time never stalls a race
+// that is being relayed on the same process.
+function encoded(entry, encoding) {
+  if (!entry[encoding]) {
+    entry[encoding] = new Promise(function (resolve, reject) {
+      var done = function (err, body) { if (err) { reject(err); } else { resolve(body); } };
+      if (encoding === "br") {
+        zlib.brotliCompress(entry.raw, BROTLI_OPTIONS, done);
+      } else {
+        zlib.gzip(entry.raw, GZIP_OPTIONS, done);
+      }
+    });
+    //a failed compression is forgotten, so the next request tries again
+    entry[encoding].catch(function () { entry[encoding] = null; });
+  }
+  return entry[encoding];
+}
+
 function serveStaticFile(req, res) {
   //strip the query string, and decode so a name with %20 in it still resolves
   var requestPath;
@@ -146,21 +234,70 @@ function serveStaticFile(req, res) {
   // otherwise resolve to a real file outside the project. Reject anything that
   // escapes CLIENT_ROOT, and the server directory too - node_modules and
   // server.js are not the browser's business.
+  //
+  // Hidden files and folders too. The project root is a git checkout, so this
+  // used to hand out .git/config and every object in .git - the whole history
+  // of the repo - and would serve a .env file the day someone added one.
   var filePath = path.join(CLIENT_ROOT, requestPath);
   var relative = path.relative(CLIENT_ROOT, filePath);
-  if (relative.startsWith("..") || path.isAbsolute(relative) || relative.split(path.sep)[0] === "server") {
+  var segments = relative.split(path.sep);
+  if (relative.startsWith("..") || path.isAbsolute(relative) || segments[0] === "server" ||
+      segments.some(function (segment) { return segment.charAt(0) === "."; })) {
     sendPlain(res, 404, "Not found");
     return;
   }
 
-  fs.readFile(filePath, function (err, data) {
-    if (err) {
+  fs.stat(filePath, function (statErr, stat) {
+    if (statErr || !stat.isFile()) {
       sendPlain(res, 404, "Not found");
       return;
     }
-    var type = CONTENT_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
-    res.writeHead(200, { "Content-Type": type });
-    res.end(data);
+    var ext = path.extname(filePath).toLowerCase();
+    var headers = {
+      "Content-Type": CONTENT_TYPES[ext] || "application/octet-stream",
+      "Cache-Control": "no-cache",
+      //weak, because the same file goes out in up to three encodings
+      "ETag": 'W/"' + stat.size.toString(16) + "-" + Math.floor(stat.mtimeMs).toString(16) + '"'
+    };
+    var compressible = COMPRESSIBLE_TYPES[ext] === true;
+    if (compressible) {
+      //tells any cache between here and the browser that the body depends on it
+      headers["Vary"] = "Accept-Encoding";
+    }
+
+    if (req.headers["if-none-match"] === headers["ETag"]) {
+      res.writeHead(304, headers);
+      res.end();
+      return;
+    }
+
+    readCached(filePath, stat, function (readErr, entry) {
+      if (readErr) {
+        sendPlain(res, 404, "Not found");
+        return;
+      }
+      // A known length rather than a chunked stream, so a phone loading the
+      // game over mobile data can show real progress on the 400KB it is
+      // waiting for.
+      var send = function (body) {
+        headers["Content-Length"] = body.length;
+        res.writeHead(200, headers);
+        res.end(body);
+      };
+      var accepted = compressible ? acceptedEncodings(req) : {};
+      var encoding = accepted.br ? "br" : (accepted.gzip ? "gzip" : null);
+      if (!encoding) {
+        send(entry.raw);
+        return;
+      }
+      encoded(entry, encoding).then(function (body) {
+        headers["Content-Encoding"] = encoding;
+        send(body);
+      }, function () {
+        //compression is an optimisation - never a reason to fail the request
+        send(entry.raw);
+      });
+    });
   });
 }
 

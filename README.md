@@ -98,8 +98,8 @@ npm test
 ```
 
 Runs from the repo root, needs no browser, and takes about forty seconds. The
-runner starts its own relay on a spare port for the four suites that speak
-real WebSockets, then shuts it down.
+runner starts its own relay on a spare port for the five suites that talk to a
+real server, then shuts it down.
 
 The game is one big p5 sketch, so the suites load `sketch.js` into a stubbed p5
 and drive the real `draw()` loop rather than testing copies of the logic. What
@@ -130,6 +130,7 @@ they cover, and why each exists:
 | `monkey-test` | 100,000 frames of random input — no crash, wedge, NaN or leak |
 | `relay/race/rematch-test` | The wire protocol, against a real server |
 | `server-hardening-test` | Junk frames, oversized frames and room hoarding |
+| `static-test` | Game files go out compressed and revalidate as 304; `.git` and other hidden files are never served |
 
 `test/tools/measure-art.js` prints the luminance of every sprite against the
 night palette. It is not a test — it is where the outline threshold's value

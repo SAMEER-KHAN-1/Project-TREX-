@@ -60,6 +60,7 @@ const INTEGRATION = [
   "race-test.js",
   "rematch-test.js",
   "server-hardening-test.js",
+  "static-test.js",
 ];
 
 function waitForPort(port, timeoutMs) {
