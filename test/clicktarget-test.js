@@ -50,6 +50,22 @@ function makeGroup() {
 // a button really ended up rather than at where it was supposed to.
 let paintedOffsetY = 0;
 
+// p5.play centres its camera on the canvas once, on the first frame it draws,
+// and from then on drawSprites() shifts everything by however far the canvas's
+// middle has moved from that spot - and the shift is still in force when the
+// screen overlays are painted. Modelled here because it is what made buttons
+// land below the place the hit tests looked.
+let cameraShiftY = 0;
+const stubCamera = { position: { x: 0, y: 0 }, init: false };
+function stubDrawSprites() {
+  if (!stubCamera.init && stubCamera.position.x === 0 && stubCamera.position.y === 0) {
+    stubCamera.position.x = sandbox.width / 2;
+    stubCamera.position.y = sandbox.height / 2;
+    stubCamera.init = true;
+  }
+  cameraShiftY = sandbox.height / 2 - stubCamera.position.y;
+}
+
 const sandbox = {
   window: { location: { search: "", protocol: "http:", host: "h:8080", origin: "http://h:8080", pathname: "/" }, addEventListener: noop, isSecureContext: false, innerWidth: 1200, innerHeight: 400 },
   navigator: {},
@@ -78,7 +94,7 @@ const sandbox = {
   noStroke: noop, stroke: noop, strokeWeight: noop,
   fill: noop, rect: noop, ellipse: noop, text: noop, textFont: noop, textAlign: noop,
   textSize: noop, image: noop, imageMode: noop, tint: noop, rectMode: noop, line: noop,
-  drawSprites: noop, createSprite: makeSprite, Group: function () { return makeGroup(); },
+  camera: stubCamera, drawSprites: stubDrawSprites, createSprite: makeSprite, Group: function () { return makeGroup(); },
   CENTER: "c", RIGHT: "r", TOP: "t", LEFT: "l", BOTTOM: "b", CORNER: "corner", CLOSE: "close",
   width: 600, height: 200, windowWidth: 1200, windowHeight: 400,
   createGraphics: (w, h) => ({ width: w, height: h, pixels: [60, 60, 60, 255], clear: noop, image: noop, loadPixels: noop, updatePixels: noop, noStroke: noop, fill: noop, ellipse: noop, triangle: noop, beginShape: noop, vertex: noop, endShape: noop, stroke: noop, strokeWeight: noop, line: noop, get: () => fakeImage("white", w, h) }),
@@ -138,7 +154,7 @@ function silentResizeTo(w, h) {
 function aimAtPainted(x, y) {
   return {
     clientX: cssBox.left + x * (cssBox.width / sandbox.width),
-    clientY: cssBox.top + (y + paintedOffsetY) * (cssBox.height / sandbox.height),
+    clientY: cssBox.top + (y + paintedOffsetY + cameraShiftY) * (cssBox.height / sandbox.height),
     pointerType: "mouse",
   };
 }
@@ -179,6 +195,21 @@ for (const [label, w, h] of [
     }
   }
   check(label, missed.length === 0, missed.join(" "));
+}
+
+// The window changing shape after the first frame - fullscreen, a resize, a
+// phone turned over - must not shift the picture off its hit boxes.
+console.log("");
+console.log("canvas reshaped after the first frame");
+resizeTo(1440, 900);
+sandbox.gameState = sandbox.MENU;
+frame();
+resizeTo(390, 844);
+frame();
+check("camera stays centred on the canvas", cameraShiftY === 0, String(cameraShiftY));
+{
+  const b = sandbox.MENU_SINGLE_PLAYER_BUTTON;
+  check("button still hits where painted", press(aimAtPainted(b.x, b.y + b.h / 2 - 1)) === b);
 }
 
 // A viewport change the browser never announced. Without a per-frame layout

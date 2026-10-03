@@ -2900,6 +2900,25 @@ function displayPixelDensity(cssWidth) {
   return bufferWidth / GAME_WIDTH;
 }
 
+// p5.play wraps drawSprites() in a camera, and centres that camera on the
+// canvas exactly once - on the first frame - then never again. The canvas does
+// not keep its shape: going fullscreen, resizing the window or turning a phone
+// all change its height, and from then on the camera sat at the old middle and
+// shifted the whole picture by the difference. Everything was painted that far
+// below where the hit tests (which know nothing about the camera) looked for
+// it, so buttons only answered to a click a little above where they were drawn.
+// The game never scrolls, so the camera belongs on the middle of whatever the
+// canvas is now.
+function recentreCamera() {
+  if (typeof camera === "undefined" || !camera || !camera.position) {
+    return;
+  }
+  camera.position.x = width / 2;
+  camera.position.y = height / 2;
+  //left false, p5.play would re-centre it itself on the next frame and undo this
+  camera.init = true;
+}
+
 function fillScreen() {
   var screenWidth = viewportWidth();
   var screenHeight = viewportHeight();
@@ -2909,6 +2928,7 @@ function fillScreen() {
     resizeCanvas(GAME_WIDTH, viewHeight, true);
   }
   viewOffsetY = Math.round((height - GAME_HEIGHT) * SKY_SHARE_OF_EXTRA_HEIGHT);
+  recentreCamera();
 
   //only a window wider than 3:1 still gets bars (at the sides)
   var scaleFactor = Math.min(screenWidth / width, screenHeight / height);
