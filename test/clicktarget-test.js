@@ -212,6 +212,27 @@ check("camera stays centred on the canvas", cameraShiftY === 0, String(cameraShi
   check("button still hits where painted", press(aimAtPainted(b.x, b.y + b.h / 2 - 1)) === b);
 }
 
+// A mouse that has not moved still has to be hovering the right button once the
+// canvas has been reshaped under it - there is no pointermove to tell the game.
+console.log("");
+console.log("hover follows a reshaped canvas");
+resizeTo(1440, 900);
+sandbox.gameState = sandbox.MENU;
+frame();
+{
+  const b = sandbox.MENU_SINGLE_PLAYER_BUTTON;
+  const at = aimAtPainted(b.x, b.y);
+  listeners.pointermove(at);
+  frame();
+  check("button lit under the cursor", sandbox.buttonIsHovered(b));
+  resizeTo(844, 390);
+  frame();
+  check("no longer lit once the canvas moved off it", !sandbox.buttonIsHovered(b));
+  listeners.pointerleave();
+  frame();
+  check("not lit after the pointer leaves", !sandbox.buttonIsHovered(b));
+}
+
 // A viewport change the browser never announced. Without a per-frame layout
 // sync the canvas stays sized for a window that no longer exists.
 console.log("");

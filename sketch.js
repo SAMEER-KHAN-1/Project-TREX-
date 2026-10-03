@@ -1869,11 +1869,24 @@ function onCanvasPointerMove(evt) {
   if (evt.pointerType && evt.pointerType !== "mouse" && evt.pointerType !== "pen") {
     return;
   }
+  pointerClientPos = { clientX: evt.clientX, clientY: evt.clientY };
   pointerGamePos = canvasPointerToGame(evt);
 }
 
 function onCanvasPointerLeave() {
+  pointerClientPos = null;
   pointerGamePos = null;
+}
+
+// The mouse sits still while the canvas moves under it - entering fullscreen or
+// resizing the window reshapes the strip without a single pointermove - so the
+// game position it last reported goes stale and the wrong button stays lit.
+// Re-deriving it from where the pointer is on the page, every frame, keeps the
+// highlight on whatever is really under the cursor.
+function refreshPointerGamePos() {
+  if (pointerClientPos) {
+    pointerGamePos = canvasPointerToGame(pointerClientPos);
+  }
 }
 
 function onPointerRelease() {
@@ -2050,6 +2063,9 @@ var BUTTON_EDGE = 2;
 // tracking taps here would leave a button stuck looking highlighted long after
 // the finger had gone.
 var pointerGamePos = null;
+//where the mouse is on the page, which - unlike the above - does not go stale
+//when the canvas is reshaped under it
+var pointerClientPos = null;
 //the button currently held down, so it can be drawn depressed
 var pressedButton = null;
 //set by drawButton() each frame, read after drawing to pick the CSS cursor
@@ -3746,6 +3762,7 @@ function draw() {
   //before anything reads width/height/viewOffsetY, so a viewport change the
   //browser never announced cannot leave this frame drawn to the old shape
   syncScreenLayout();
+  refreshPointerGamePos();
   //recomputed from scratch each frame by whichever buttons actually draw
   pointerIsOverButton = false;
 
