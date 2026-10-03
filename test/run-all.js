@@ -49,6 +49,7 @@ const UNIT = [
   "roominput-test.js",
   "statemachine-test.js",
   "highscore-test.js",
+  "autopause-test.js",
   "connect-test.js",
   "deploy-test.js",
   "monkey-test.js",

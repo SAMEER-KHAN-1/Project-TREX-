@@ -3415,6 +3415,29 @@ function handlePauseToggle() {
   pauseKeyWasDown = pauseKeyIsDown;
 }
 
+// Looking away is not the same as quitting. Alt-tabbing to a message, or
+// clicking onto a second monitor, used to leave the run going with nobody
+// watching it - the player came back to a game over screen. Asked for through
+// pauseRequested like the pause button is, so it goes through the one place
+// that knows how to freeze the world, and only mid-run: pausing a race would
+// be a free timeout, and on any other screen there is nothing to hold still.
+function pauseWhenLookedAwayFrom() {
+  if (gameState === PLAY && !mpIsRacing) {
+    pauseRequested = true;
+  }
+}
+
+if (typeof window !== "undefined" && window.addEventListener) {
+  window.addEventListener("blur", pauseWhenLookedAwayFrom);
+}
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") {
+      pauseWhenLookedAwayFrom();
+    }
+  });
+}
+
 function playTone(frequency, durationSeconds, type, delaySeconds) {
   if (soundMuted) {
     return;
