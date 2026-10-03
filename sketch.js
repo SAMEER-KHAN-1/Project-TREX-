@@ -3651,10 +3651,33 @@ function isNightMode() {
 var DAY_NIGHT_TRANSITION_MS = 1000;
 var nightAmount = 0;
 
-var DAY_SKY = [135, 206, 235];
-var NIGHT_SKY = [20, 24, 46];
-var DAY_SAND = [222, 184, 135];
-var NIGHT_SAND = [60, 56, 48];
+// ---------------------------------------------------------------------------
+// Levels
+//
+// Everything that decides what the world LOOKS like - the sky, the sand and the
+// hills behind it, each in a day and a night shade - lives in one table, so a
+// new level is a new entry rather than a new set of constants scattered
+// through draw(). Nothing here touches the course: obstacles, speed and
+// spacing are the same whichever level is showing, which is what keeps both
+// players in a race on identical ground.
+// ---------------------------------------------------------------------------
+var LEVELS = [
+  {
+    name: "DESERT",
+    daySky: [135, 206, 235],
+    nightSky: [20, 24, 46],
+    daySand: [222, 184, 135],
+    nightSand: [60, 56, 48],
+    dayHills: [193, 168, 130],
+    nightHills: [30, 32, 52]
+  }
+];
+
+var levelIndex = 0;
+
+function activeLevel() {
+  return LEVELS[levelIndex];
+}
 
 function blendRgb(dayRgb, nightRgb, t) {
   return [
@@ -3744,11 +3767,9 @@ var HILLS_BUMPS = [
   { x: 130, w: 100, h: 40 },
   { x: 230, w: 150, h: 70 }
 ];
-var HILLS_DAY_COLOR = [193, 168, 130];
-var HILLS_NIGHT_COLOR = [30, 32, 52];
-
 function drawHills(groundLineY, nightAmount) {
-  var color = blendRgb(HILLS_DAY_COLOR, HILLS_NIGHT_COLOR, nightAmount);
+  var level = activeLevel();
+  var color = blendRgb(level.dayHills, level.nightHills, nightAmount);
   fill(color[0], color[1], color[2]);
 
   //only the top arc of each ellipse ends up visible - the sand rect drawn
@@ -3811,7 +3832,8 @@ function draw() {
     updateStars(dtFactor);
   }
 
-  var sky = blendRgb(DAY_SKY, NIGHT_SKY, nightAmount);
+  var level = activeLevel();
+  var sky = blendRgb(level.daySky, level.nightSky, nightAmount);
   background(sky[0], sky[1], sky[2]);
   noStroke();
   //painted before drawSprites(), so clouds and the trex pass in front of them
@@ -3819,7 +3841,7 @@ function draw() {
   //drawn before the sand rect, which covers everything below the ground line
   //and leaves just the hill tops poking above the horizon
   drawHills(viewOffsetY + 178, nightAmount);
-  var sand = blendRgb(DAY_SAND, NIGHT_SAND, nightAmount);
+  var sand = blendRgb(level.daySand, level.nightSand, nightAmount);
   fill(sand[0], sand[1], sand[2]);
   //from the ground line all the way to the bottom of the screen
   rect(0, viewOffsetY + 178, width, height - (viewOffsetY + 178));
